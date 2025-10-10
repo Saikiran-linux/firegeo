@@ -12,7 +12,7 @@ import {
 import { FEATURE_ID_MESSAGES } from '@/config/constants';
 
 const autumn = new Autumn({
-  apiKey: process.env.AUTUMN_SECRET_KEY!,
+  secretKey: process.env.AUTUMN_SECRET_KEY!,
 });
 
 export async function POST(request: NextRequest) {
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       if (!access.data?.allowed || (access.data?.balance && access.data.balance < 1)) {
         throw new InsufficientCreditsError(
           'Insufficient credits. You need at least 1 credit to analyze a URL.',
-          { required: 1, available: access.data?.balance || 0 }
+          access.data?.balance || 0
         );
       }
     } catch (error) {
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       await autumn.track({
         customer_id: sessionResponse.user.id,
         feature_id: FEATURE_ID_MESSAGES,
-        count: 1,
+        value: 1,
       });
     } catch (err) {
       console.error('[Brand Monitor Scrape] Error tracking usage:', err);

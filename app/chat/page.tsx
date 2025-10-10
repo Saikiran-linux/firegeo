@@ -45,7 +45,7 @@ function ChatContent({ session }: { session: any }) {
 
     try {
       const response = await sendMessage.mutateAsync({
-        conversationId: selectedConversationId,
+        conversationId: selectedConversationId || undefined,
         message: input,
       });
       
@@ -211,7 +211,7 @@ function ChatContent({ session }: { session: any }) {
                     <p className={`text-xs mt-1 ${
                       message.role === 'user' ? 'text-orange-100' : 'text-gray-500'
                     }`}>
-                      {format(new Date(message.createdAt), 'h:mm a')}
+                      {message.createdAt && format(new Date(message.createdAt), 'h:mm a')}
                     </p>
                   </div>
                 </div>

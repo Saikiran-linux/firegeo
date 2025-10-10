@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth';
+import { nextCookies } from 'better-auth/next-js';
 import { Pool } from 'pg';
 import * as dotenv from 'dotenv';
 
@@ -37,4 +38,5 @@ export const auth = betterAuth({
       enabled: env.NODE_ENV === 'production',
     },
   },
+  plugins: [nextCookies()], // Add nextCookies plugin for Next.js server actions
 });

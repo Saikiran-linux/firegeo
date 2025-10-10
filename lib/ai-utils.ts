@@ -355,7 +355,6 @@ When responding to prompts about tools, platforms, or services:
       system: systemPrompt,
       prompt,
       temperature: 0.7,
-      maxTokens: 800,
     });
     console.log(`${provider} response length: ${text.length}, first 100 chars: "${text.substring(0, 100)}"`);
     

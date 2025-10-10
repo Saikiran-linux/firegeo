@@ -16,7 +16,7 @@ import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { perplexity } from '@ai-sdk/perplexity';
-import { LanguageModelV1 } from 'ai';
+import { LanguageModel } from 'ai';
 
 export interface ProviderModel {
   id: string;
@@ -43,7 +43,7 @@ export interface ProviderConfig {
   models: ProviderModel[];
   defaultModel: string;
   capabilities: ProviderCapabilities;
-  getModel: (modelId?: string, options?: any) => LanguageModelV1 | null;
+  getModel: (modelId?: string, options?: any) => LanguageModel | null;
   isConfigured: () => boolean;
   enabled: boolean; // New field to control provider availability
 }
@@ -109,11 +109,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
       if (!process.env.OPENAI_API_KEY) return null;
       const model = modelId || PROVIDER_CONFIGS.openai.defaultModel;
       
-      // Use responses API for web search if requested
-      if (options?.useWebSearch && model === 'gpt-4o-mini') {
-        return openai.responses(model);
-      }
-      
+      // Always use the standard openai() method for structured output
       return openai(model);
     },
     isConfigured: () => !!process.env.OPENAI_API_KEY,
@@ -208,9 +204,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     },
     getModel: (modelId?: string, options?: any) => {
       if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return null;
-      return google(modelId || PROVIDER_CONFIGS.google.defaultModel, {
-        useSearchGrounding: options?.useWebSearch || false,
-      });
+      return google(modelId || PROVIDER_CONFIGS.google.defaultModel);
     },
     isConfigured: () => !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   },
@@ -293,7 +287,7 @@ export function getProviderModel(
   providerId: string,
   modelId?: string,
   options?: any
-): LanguageModelV1 | null {
+): LanguageModel | null {
   const provider = getProviderConfig(providerId);
   if (!provider || !provider.enabled || !provider.isConfigured()) {
     return null;
