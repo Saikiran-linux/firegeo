@@ -3,7 +3,7 @@
 import { BrandMonitor } from '@/components/brand-monitor/brand-monitor';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Menu, X, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Menu, X, Plus, Trash2, Loader2 } from 'lucide-react';
 import { useCustomer, useRefreshCustomer } from '@/hooks/useAutumnCustomer';
 import { useBrandAnalyses, useBrandAnalysis, useDeleteBrandAnalysis } from '@/hooks/useBrandAnalyses';
 import { Button } from '@/components/ui/button';

@@ -31,7 +31,7 @@ export async function performAnalysis({
   company,
   customPrompts,
   userSelectedCompetitors,
-  useWebSearch = false,
+  useWebSearch = true,
   sendEvent
 }: AnalysisConfig): Promise<AnalysisResult> {
   // Send start event
@@ -192,7 +192,8 @@ export async function performAnalysis({
           // Debug log for each provider attempt
           console.log(`Attempting analysis with provider: ${provider.name} for prompt: "${prompt.prompt.substring(0, 50)}..."`);
           
-          // Choose the appropriate analysis function based on useWebSearch
+          // Use enhanced version when web search is enabled, otherwise use regular version
+          // Both versions now support the useWebSearch parameter
           const analyzeFunction = useWebSearch ? analyzePromptWithProviderEnhanced : analyzePromptWithProvider;
           
           const response = await analyzeFunction(
@@ -201,7 +202,7 @@ export async function performAnalysis({
             company.name, 
             competitors,
             useMockMode,
-            ...(useWebSearch ? [true] : []) // Pass web search flag only for enhanced version
+            useWebSearch // Pass web search flag to both versions
           );
           
           console.log(`Analysis completed for ${provider.name}:`, {

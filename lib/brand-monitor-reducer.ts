@@ -18,6 +18,8 @@ export type BrandMonitorAction =
   | { type: 'REMOVE_DEFAULT_PROMPT'; payload: number }
   | { type: 'SET_AVAILABLE_PROVIDERS'; payload: string[] }
   | { type: 'SET_IDENTIFIED_COMPETITORS'; payload: IdentifiedCompetitor[] }
+  | { type: 'SET_AI_COMPETITORS'; payload: string[] }
+  | { type: 'SET_SCRAPING_COMPETITORS'; payload: boolean }
   | { type: 'REMOVE_COMPETITOR'; payload: number }
   | { type: 'ADD_COMPETITOR'; payload: IdentifiedCompetitor }
   | { type: 'UPDATE_COMPETITOR_METADATA'; payload: { index: number; metadata: CompetitorMetadata } }
@@ -134,6 +136,7 @@ export interface BrandMonitorState {
   
   // Competitors
   identifiedCompetitors: IdentifiedCompetitor[];
+  aiCompetitors: string[];
   
   // Providers
   availableProviders: string[];
@@ -176,6 +179,7 @@ export const initialBrandMonitorState: BrandMonitorState = {
   removedDefaultPrompts: [],
   analyzingPrompts: [],
   identifiedCompetitors: [],
+  aiCompetitors: [],
   availableProviders: [],
   analysisProgress: {
     stage: 'initializing',
@@ -252,10 +256,17 @@ export function brandMonitorReducer(
     case 'SET_IDENTIFIED_COMPETITORS':
       return { ...state, identifiedCompetitors: action.payload };
       
+    case 'SET_AI_COMPETITORS':
+      return { ...state, aiCompetitors: action.payload };
+
+    case 'SET_SCRAPING_COMPETITORS':
+      return { ...state, scrapingCompetitors: action.payload };
+
     case 'REMOVE_COMPETITOR':
       return { 
         ...state, 
-        identifiedCompetitors: state.identifiedCompetitors.filter((_, i) => i !== action.payload) 
+        identifiedCompetitors: state.identifiedCompetitors.filter((_, i) => i !== action.payload),
+        aiCompetitors: state.aiCompetitors.filter((_, i) => i !== action.payload)
       };
       
     case 'ADD_COMPETITOR':

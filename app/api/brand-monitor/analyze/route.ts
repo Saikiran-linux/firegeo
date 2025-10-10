@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { Autumn } from 'autumn-js';
 import { performAnalysis, createSSEMessage } from '@/lib/analyze-common';
-import { SSEEvent } from '@/lib/types';
+import { SSEEvent, ProgressData } from '@/lib/types';
 import { 
   AuthenticationError, 
   InsufficientCreditsError, 
@@ -13,12 +13,11 @@ import {
 import { 
   FEATURE_ID_MESSAGES, 
   CREDITS_PER_BRAND_ANALYSIS,
-  ERROR_MESSAGES,
-  SSE_MAX_DURATION
+  ERROR_MESSAGES
 } from '@/config/constants';
 
 const autumn = new Autumn({
-  apiKey: process.env.AUTUMN_SECRET_KEY!,
+  secretKey: process.env.AUTUMN_SECRET_KEY!,
 });
 
 export const runtime = 'nodejs'; // Use Node.js runtime for streaming
@@ -41,7 +40,7 @@ export async function POST(request: NextRequest) {
       const access = await autumn.check({
         customer_id: sessionResponse.user.id,
         feature_id: FEATURE_ID_MESSAGES,
-      });
+      }) as { data?: { allowed?: boolean; balance?: number } };
       console.log('[Brand Monitor] Access check result:', JSON.stringify(access.data, null, 2));
       
       if (!access.data?.allowed || (access.data?.balance && access.data.balance < CREDITS_PER_BRAND_ANALYSIS)) {
@@ -60,12 +59,12 @@ export async function POST(request: NextRequest) {
     // Track usage (10 credits)
     try {
       console.log('[Brand Monitor] Tracking usage - Customer ID:', sessionResponse.user.id, 'Count:', CREDITS_PER_BRAND_ANALYSIS);
-      const trackResult = await autumn.track({
+      const trackResult = await (autumn.track({
         customer_id: sessionResponse.user.id,
         feature_id: FEATURE_ID_MESSAGES,
-        count: CREDITS_PER_BRAND_ANALYSIS,
-      });
-      console.log('[Brand Monitor] Track result:', JSON.stringify(trackResult, null, 2));
+        value: CREDITS_PER_BRAND_ANALYSIS,
+      }) as Promise<{ data?: unknown }>);
+      console.log('[Brand Monitor] Track result:', JSON.stringify(trackResult.data, null, 2));
     } catch (err) {
       console.error('[Brand Monitor] Failed to track usage:', err);
       // Log more details about the error
@@ -79,7 +78,7 @@ export async function POST(request: NextRequest) {
       throw new ExternalServiceError('Unable to process credit deduction. Please try again', 'autumn');
     }
 
-    const { company, prompts: customPrompts, competitors: userSelectedCompetitors, useWebSearch = false } = await request.json();
+    const { company, prompts: customPrompts, competitors: userSelectedCompetitors, useWebSearch = true } = await request.json();
 
     if (!company || !company.name) {
       throw new ValidationError(ERROR_MESSAGES.COMPANY_INFO_REQUIRED, {
@@ -90,11 +89,11 @@ export async function POST(request: NextRequest) {
     // Track usage with Autumn (deduct credits)
     try {
       console.log('[Brand Monitor] Recording usage - Customer ID:', sessionResponse.user.id);
-      await autumn.track({
+      await (autumn.track({
         customer_id: sessionResponse.user.id,
         feature_id: FEATURE_ID_MESSAGES,
-        count: CREDITS_PER_BRAND_ANALYSIS,
-      });
+        value: CREDITS_PER_BRAND_ANALYSIS,
+      }) as Promise<unknown>);
       console.log('[Brand Monitor] Usage recorded successfully');
     } catch (err) {
       console.error('Failed to track usage:', err);
@@ -107,7 +106,7 @@ export async function POST(request: NextRequest) {
       const usage = await autumn.check({
         customer_id: sessionResponse.user.id,
         feature_id: FEATURE_ID_MESSAGES,
-      });
+      }) as { data?: { balance?: number } };
       remainingCredits = usage.data?.balance || 0;
     } catch (err) {
       console.error('Failed to get remaining credits:', err);
@@ -127,14 +126,19 @@ export async function POST(request: NextRequest) {
     (async () => {
       try {
         // Send initial credit info
+        const initialProgress: ProgressData & { remainingCredits: number; creditsUsed: number } = {
+          stage: 'initializing',
+          progress: 0,
+          message: 'Credits verified',
+          remainingCredits,
+          creditsUsed: CREDITS_PER_BRAND_ANALYSIS,
+        };
+
         await sendEvent({
-          type: 'credits',
-          stage: 'credits',
-          data: {
-            remainingCredits,
-            creditsUsed: CREDITS_PER_BRAND_ANALYSIS
-          },
-          timestamp: new Date()
+          type: 'progress',
+          stage: 'initializing',
+          data: initialProgress,
+          timestamp: new Date(),
         });
 
         // Perform the analysis using common logic
@@ -159,7 +163,7 @@ export async function POST(request: NextRequest) {
         console.error('Analysis error:', error);
         await sendEvent({
           type: 'error',
-          stage: 'error',
+          stage: 'finalizing',
           data: {
             message: error instanceof Error ? error.message : 'Analysis failed'
           },

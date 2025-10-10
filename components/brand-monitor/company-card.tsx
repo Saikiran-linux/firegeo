@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Globe, Building2, ExternalLink, Plus, Trash2 } from 'lucide-react';
 import { Company } from '@/lib/types';
 import Image from 'next/image';
+import { assignUrlToCompetitor } from '@/lib/brand-monitor-utils';
 
 interface CompanyCardProps {
   company: Company;
@@ -23,6 +24,8 @@ interface CompanyCardProps {
     };
     loading?: boolean;
   }>;
+  aiCompetitors?: string[];
+  scrapingCompetitors?: boolean;
   onRemoveCompetitor?: (index: number) => void;
   onAddCompetitor?: () => void;
   onContinueToAnalysis?: () => void;
@@ -34,6 +37,8 @@ export function CompanyCard({
   analyzing,
   showCompetitors = false,
   identifiedCompetitors = [],
+  aiCompetitors = [],
+  scrapingCompetitors = false,
   onRemoveCompetitor,
   onAddCompetitor,
   onContinueToAnalysis 
@@ -54,6 +59,17 @@ export function CompanyCard({
   
   const validLogoUrl = isValidUrl(company.logo) ? company.logo : null;
   const validFaviconUrl = isValidUrl(company.favicon) ? company.favicon : null;
+
+  const hydratedCompetitors = React.useMemo(() => {
+    if (!showCompetitors) return [];
+    return identifiedCompetitors.map(competitor => {
+      if (competitor.url) return competitor;
+      return {
+        ...competitor,
+        url: assignUrlToCompetitor(competitor.name) || undefined,
+      };
+    });
+  }, [identifiedCompetitors, showCompetitors]);
 
   return (
     <Card className="p-2 bg-card text-card-foreground gap-6 rounded-xl border py-6 shadow-sm border-gray-200 overflow-hidden transition-all hover:shadow-lg">
@@ -160,18 +176,38 @@ export function CompanyCard({
       </div>
       
       {/* Competitors Section */}
-      {showCompetitors && identifiedCompetitors.length > 0 && (
+      {showCompetitors && (
         <div className="border-t border-gray-200">
           <div className="px-8 py-6">
             <div className="mb-4">
-              <div>
-                <h3 className="text-sm font-medium text-gray-900">Competitors</h3>
-                <p className="text-sm text-gray-500">We'll compare {company.name} against these {identifiedCompetitors.length} competitors</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900">Competitors</h3>
+                  <p className="text-sm text-gray-500">We'll compare {company.name} against competitors Perplexity found plus any you add</p>
+                </div>
+                {scrapingCompetitors && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <div className="h-3 w-3 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+                    Updating...
+                  </div>
+                )}
               </div>
+              {aiCompetitors.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Perplexity suggestions</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {aiCompetitors.slice(0, 6).map((competitor, idx) => (
+                      <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                        {competitor}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
               
               <div className="grid grid-cols-3 gap-4">
-                {identifiedCompetitors.map((competitor, idx) => (
+                {hydratedCompetitors.map((competitor, idx) => (
                   <div 
                     key={idx} 
                     className="group relative bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-all opacity-0 animate-fade-up"

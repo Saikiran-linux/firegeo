@@ -6,7 +6,7 @@ import { analyzeWithAnthropicWebSearch } from './anthropic-web-search';
 
 const RankingSchema = z.object({
   rankings: z.array(z.object({
-    position: z.number(),
+    position: z.number().nullable().optional(),
     company: z.string(),
     reason: z.string().optional(),
     sentiment: z.enum(['positive', 'neutral', 'negative']).optional(),
@@ -43,23 +43,15 @@ export async function analyzePromptWithProviderEnhanced(
     return null as any;
   }
   
-  let model;
-  const generateConfig: any = {};
-  
-  // Handle provider-specific web search configurations
-  if (normalizedProvider === 'openai' && useWebSearch) {
-    // Use OpenAI's web search via responses API
-    model = getProviderModel('openai', 'gpt-4o-mini', { useWebSearch: true });
-    // Note: Web search tools configuration would need to be handled by the provider's getModel implementation
-  } else {
-    // Get model with web search options if supported
-    model = getProviderModel(normalizedProvider, undefined, { useWebSearch });
-  }
+  // Get model with web search options if supported
+  const model = getProviderModel(normalizedProvider, undefined, { useWebSearch });
   
   if (!model) {
     console.warn(`Failed to get model for ${provider}`);
     return null as any;
   }
+  
+  console.log(`${provider} model obtained with web search: ${useWebSearch}`);
 
   const systemPrompt = `You are an AI assistant analyzing brand visibility and rankings.
 When responding to prompts about tools, platforms, or services:
@@ -77,13 +69,11 @@ When responding to prompts about tools, platforms, or services:
 
   try {
     // First, get the response with potential web search
-    const { text, sources } = await generateText({
+    const { text } = await generateText({
       model,
       system: systemPrompt,
       prompt: enhancedPrompt,
       temperature: 0.7,
-      maxTokens: 800,
-      ...generateConfig, // Spread generation configuration (includes tools for OpenAI)
     });
 
     // Then analyze it with structured output
@@ -112,41 +102,82 @@ Be very thorough in detecting company names - they might appear in different con
       
       const result = await generateObject({
         model: analysisModel,
-        system: 'You are an expert at analyzing text and extracting structured information about companies and rankings.',
+        system: 'You are an expert at analyzing text and extracting structured information about companies and rankings. Always respond with valid JSON that matches the required schema exactly.',
         prompt: analysisPrompt,
         schema: RankingSchema,
-        temperature: 0.3,
+        temperature: 0.1, // Lower temperature for consistency
+        maxRetries: 3, // More retries
       });
       object = result.object;
     } catch (error) {
       console.error('Structured analysis failed:', error);
-      // Fallback to basic analysis
-      const textLower = text.toLowerCase();
-      const brandNameLower = brandName.toLowerCase();
       
-      // More robust brand detection
-      const mentioned = textLower.includes(brandNameLower) ||
-        textLower.includes(brandNameLower.replace(/\s+/g, '')) ||
-        textLower.includes(brandNameLower.replace(/[^a-z0-9]/g, ''));
+      // Try with more explicit instructions
+      try {
+        const analysisModel = getProviderModel('openai', 'gpt-4o-mini');
+        if (analysisModel) {
+          const explicitPrompt = `Analyze this text and return ONLY a JSON object with this exact structure:
+
+{
+  "rankings": [{"position": 1, "company": "Name", "reason": "Why", "sentiment": "positive"}],
+  "analysis": {
+    "brandMentioned": true,
+    "brandPosition": 1,
+    "competitors": ["Competitor1"],
+    "overallSentiment": "positive",
+    "confidence": 0.8
+  }
+}
+
+Text to analyze: "${text}"
+
+Look for: "${brandName}" and competitors: ${competitors.join(', ')}
+
+Return ONLY the JSON object.`;
+
+          const result = await generateObject({
+            model: analysisModel,
+            system: 'You must respond with valid JSON that matches the schema exactly. No other text.',
+            prompt: explicitPrompt,
+            schema: RankingSchema,
+            temperature: 0.1,
+            maxRetries: 2,
+          });
+          object = result.object;
+        } else {
+          throw new Error('No analysis model available');
+        }
+      } catch (secondError) {
+        console.error('Second structured analysis attempt failed:', secondError);
         
-      // More robust competitor detection
-      const detectedCompetitors = competitors.filter(c => {
-        const cLower = c.toLowerCase();
-        return textLower.includes(cLower) ||
-          textLower.includes(cLower.replace(/\s+/g, '')) ||
-          textLower.includes(cLower.replace(/[^a-z0-9]/g, ''));
-      });
-      
-      object = {
-        rankings: [],
-        analysis: {
-          brandMentioned: mentioned,
-          brandPosition: undefined,
-          competitors: detectedCompetitors,
-          overallSentiment: 'neutral' as const,
-          confidence: 0.5,
-        },
-      };
+        // Enhanced fallback to basic analysis
+        const textLower = text.toLowerCase();
+        const brandNameLower = brandName.toLowerCase();
+        
+        // More robust brand detection
+        const mentioned = textLower.includes(brandNameLower) ||
+          textLower.includes(brandNameLower.replace(/\s+/g, '')) ||
+          textLower.includes(brandNameLower.replace(/[^a-z0-9]/g, ''));
+          
+        // More robust competitor detection
+        const detectedCompetitors = competitors.filter(c => {
+          const cLower = c.toLowerCase();
+          return textLower.includes(cLower) ||
+            textLower.includes(cLower.replace(/\s+/g, '')) ||
+            textLower.includes(cLower.replace(/[^a-z0-9]/g, ''));
+        });
+        
+        object = {
+          rankings: [],
+          analysis: {
+            brandMentioned: mentioned,
+            brandPosition: undefined,
+            competitors: detectedCompetitors,
+            overallSentiment: 'neutral' as const,
+            confidence: 0.5,
+          },
+        };
+      }
     }
 
     // Fallback: simple text-based mention detection 
@@ -185,11 +216,20 @@ Be very thorough in detecting company names - they might appear in different con
                                provider === 'perplexity' ? 'Perplexity' :
                                provider; // fallback to original
 
+    const filteredRankings = object.rankings
+      .filter((r) => typeof r.position === 'number')
+      .map((r) => ({
+        position: r.position as number,
+        company: r.company,
+        reason: r.reason,
+        sentiment: r.sentiment,
+      }));
+
     return {
       provider: providerDisplayName,
       prompt,
       response: text,
-      rankings: object.rankings,
+      rankings: filteredRankings,
       competitors: relevantCompetitors,
       brandMentioned,
       brandPosition: object.analysis.brandPosition,

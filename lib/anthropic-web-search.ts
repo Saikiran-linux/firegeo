@@ -128,33 +128,56 @@ async function analyzeResponseContent(
   confidence: number;
 }> {
   try {
-    // Use Claude to analyze its own response
+    // Use Claude to analyze its own response with more explicit instructions
     const analysisResponse = await client.messages.create({
       model: 'claude-3-5-haiku-latest', // Use a faster model for analysis
       max_tokens: 500,
       messages: [
         {
           role: 'user',
-          content: `Analyze this AI response about ${brandName}:
+          content: `Analyze this AI response about ${brandName} and return ONLY a JSON object with this exact structure:
 
-"${responseText}"
-
-Extract the following information in JSON format:
 {
-  "brandMentioned": boolean (is ${brandName} mentioned anywhere?),
-  "brandPosition": number or null (what rank/position if mentioned),
-  "competitorsMentioned": array of competitor names mentioned from: ${competitors.join(', ')},
-  "sentiment": "positive" | "neutral" | "negative" (sentiment towards ${brandName}),
-  "confidence": number between 0 and 1
+  "brandMentioned": true,
+  "brandPosition": 1,
+  "competitorsMentioned": ["Competitor1", "Competitor2"],
+  "sentiment": "positive",
+  "confidence": 0.8
 }
 
-Only respond with valid JSON, no other text.`,
+Response to analyze:
+"${responseText}"
+
+Look for mentions of "${brandName}" and these competitors: ${competitors.join(', ')}
+
+Rules:
+- brandMentioned: true if ${brandName} appears anywhere in the text
+- brandPosition: number if ${brandName} has a specific rank/position, null otherwise
+- competitorsMentioned: array of competitor names that appear in the text
+- sentiment: "positive", "neutral", or "negative" based on how ${brandName} is described
+- confidence: number between 0 and 1
+
+Return ONLY the JSON object, no other text.`,
         }
       ],
     });
 
     const analysisText = analysisResponse.content[0].type === 'text' ? analysisResponse.content[0].text : '{}';
-    const analysis = JSON.parse(analysisText);
+    
+    // Try to parse JSON, with fallback if it fails
+    let analysis;
+    try {
+      analysis = JSON.parse(analysisText);
+    } catch (parseError) {
+      console.error('Failed to parse JSON from Claude analysis:', parseError);
+      // Extract JSON from text if it's wrapped in other text
+      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        analysis = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('No valid JSON found in response');
+      }
+    }
 
     return {
       brandMentioned: analysis.brandMentioned || false,

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useReducer, useCallback, useState, useEffect, useRef } from 'react';
+import React, { useReducer, useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Company } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sparkles } from 'lucide-react';
@@ -9,7 +9,6 @@ import { ClientApiError } from '@/lib/client-errors';
 import { 
   brandMonitorReducer, 
   initialBrandMonitorState,
-  BrandMonitorAction,
   IdentifiedCompetitor
 } from '@/lib/brand-monitor-reducer';
 import {
@@ -18,10 +17,9 @@ import {
   normalizeCompetitorName,
   assignUrlToCompetitor,
   detectServiceType,
+  formatServiceTypeForPrompt,
   getIndustryCompetitors
 } from '@/lib/brand-monitor-utils';
-import { getEnabledProviders } from '@/lib/provider-config';
-import { useSaveBrandAnalysis } from '@/hooks/useBrandAnalyses';
 
 // Components
 import { UrlInputSection } from './url-input-section';
@@ -35,9 +33,11 @@ import { AddPromptModal } from './modals/add-prompt-modal';
 import { AddCompetitorModal } from './modals/add-competitor-modal';
 import { ProviderComparisonMatrix } from './provider-comparison-matrix';
 import { ProviderRankingsTabs } from './provider-rankings-tabs';
+import { useSaveBrandAnalysis } from '@/hooks/useBrandAnalyses';
 
 // Hooks
 import { useSSEHandler } from './hooks/use-sse-handler';
+import { getEnabledProviders } from '@/lib/provider-config';
 
 interface BrandMonitorProps {
   creditsAvailable?: number;
@@ -109,6 +109,7 @@ export function BrandMonitor({
     customPrompts,
     removedDefaultPrompts,
     identifiedCompetitors,
+    aiCompetitors,
     availableProviders,
     analysisProgress,
     promptCompletionStatus,
@@ -123,6 +124,8 @@ export function BrandMonitor({
     newCompetitorUrl,
     scrapingCompetitors
   } = state;
+
+  const competitorCards = useMemo(() => identifiedCompetitors, [identifiedCompetitors]);
   
   // Remove the auto-save effect entirely - we'll save manually when analysis completes
   
@@ -277,54 +280,87 @@ export function BrandMonitor({
       dispatch({ type: 'SET_AVAILABLE_PROVIDERS', payload: defaultProviders.length > 0 ? defaultProviders : ['OpenAI', 'Anthropic'] });
     }
     
-    // Extract competitors from scraped data or use industry defaults
-    const extractedCompetitors = company.scrapedData?.competitors || [];
-    const industryCompetitors = getIndustryCompetitors(company.industry || '');
-    
-    // Merge extracted competitors with industry defaults, keeping URLs where available
-    const competitorMap = new Map<string, IdentifiedCompetitor>();
-    
-    // Add industry competitors first (they have URLs)
-    industryCompetitors.forEach(comp => {
-      const normalizedName = normalizeCompetitorName(comp.name);
-      competitorMap.set(normalizedName, comp as IdentifiedCompetitor);
-    });
-    
-    // Add extracted competitors and try to match them with known URLs
-    extractedCompetitors.forEach(name => {
-      const normalizedName = normalizeCompetitorName(name);
-      
-      // Check if we already have this competitor
-      const existing = competitorMap.get(normalizedName);
-      if (existing) {
-        // If existing has URL but current doesn't, keep existing
-        if (!existing.url) {
+    try {
+      dispatch({ type: 'SET_SCRAPING_COMPETITORS', payload: true });
+
+      let competitors: IdentifiedCompetitor[] = [];
+      let aiCompetitors: string[] = [];
+
+      try {
+        const response = await fetch('/api/brand-monitor/identify-competitors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company }),
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(errorBody?.error?.message || 'Failed to identify competitors');
+        }
+
+        const data = await response.json();
+        aiCompetitors = (data.competitors || []) as string[];
+      } catch (error) {
+        console.error('Failed to fetch AI competitors:', error);
+      }
+
+      if (aiCompetitors.length > 0) {
+        competitors = aiCompetitors.map(name => {
+          const normalizedName = normalizeCompetitorName(name);
+          const url = assignUrlToCompetitor(normalizedName) || assignUrlToCompetitor(name);
+          return {
+            name,
+            url,
+          } as IdentifiedCompetitor;
+        });
+
+        dispatch({ type: 'SET_AI_COMPETITORS', payload: aiCompetitors });
+      } 
+
+      if (competitors.length === 0) {
+        const extractedCompetitors = company.scrapedData?.competitors || [];
+        const industryCompetitors = getIndustryCompetitors(company.industry || '');
+
+        const competitorMap = new Map<string, IdentifiedCompetitor>();
+
+        industryCompetitors.forEach(comp => {
+          const normalizedName = normalizeCompetitorName(comp.name);
+          competitorMap.set(normalizedName, comp as IdentifiedCompetitor);
+        });
+
+        extractedCompetitors.forEach(name => {
+          const normalizedName = normalizeCompetitorName(name);
+          const existing = competitorMap.get(normalizedName);
+          if (existing) {
+            if (!existing.url) {
+              const url = assignUrlToCompetitor(name);
+              competitorMap.set(normalizedName, { name, url });
+            }
+            return;
+          }
           const url = assignUrlToCompetitor(name);
           competitorMap.set(normalizedName, { name, url });
-        }
-        return;
-      }
-      
-      // New competitor - try to find a URL for it
-      const url = assignUrlToCompetitor(name);
-      competitorMap.set(normalizedName, { name, url });
-    });
-    
-    let competitors = Array.from(competitorMap.values())
-      .filter(comp => comp.name !== 'Competitor 1' && comp.name !== 'Competitor 2' && 
-                      comp.name !== 'Competitor 3' && comp.name !== 'Competitor 4' && 
-                      comp.name !== 'Competitor 5')
-      .slice(0, 10);
+        });
 
-    // Just use the first 6 competitors without AI validation
-    competitors = competitors.slice(0, 6);
-    
-    console.log('Identified competitors:', competitors);
-    dispatch({ type: 'SET_IDENTIFIED_COMPETITORS', payload: competitors });
-    
-    // Show competitors on the same page with animation
-    dispatch({ type: 'SET_SHOW_COMPETITORS', payload: true });
-    dispatch({ type: 'SET_PREPARING_ANALYSIS', payload: false });
+        competitors = Array.from(competitorMap.values())
+          .filter(comp => comp.name !== 'Competitor 1' && comp.name !== 'Competitor 2' && 
+                          comp.name !== 'Competitor 3' && comp.name !== 'Competitor 4' && 
+                          comp.name !== 'Competitor 5')
+          .slice(0, 6);
+
+        dispatch({ type: 'SET_AI_COMPETITORS', payload: [] });
+      }
+
+      if (competitors.length === 0) {
+        dispatch({ type: 'SET_ERROR', payload: 'We could not identify competitors for this brand. Please add them manually.' });
+      }
+
+      dispatch({ type: 'SET_IDENTIFIED_COMPETITORS', payload: competitors });
+      dispatch({ type: 'SET_SHOW_COMPETITORS', payload: true });
+    } finally {
+      dispatch({ type: 'SET_PREPARING_ANALYSIS', payload: false });
+      dispatch({ type: 'SET_SCRAPING_COMPETITORS', payload: false });
+    }
   }, [company]);
   
   const handleProceedToPrompts = useCallback(() => {
@@ -359,12 +395,13 @@ export function BrandMonitor({
 
     // Collect all prompts (default + custom)
     const serviceType = detectServiceType(company);
+    const serviceTypeForPrompt = formatServiceTypeForPrompt(serviceType);
     const currentYear = new Date().getFullYear();
     const defaultPrompts = [
-      `Best ${serviceType}s in ${currentYear}?`,
-      `Top ${serviceType}s for startups?`,
-      `Most popular ${serviceType}s today?`,
-      `Recommended ${serviceType}s for developers?`
+      `Best ${serviceTypeForPrompt} in ${currentYear}?`,
+      `Top ${serviceTypeForPrompt} for startups?`,
+      `Most popular ${serviceTypeForPrompt} today?`,
+      `Recommended ${serviceTypeForPrompt} for developers?`
     ].filter((_, index) => !removedDefaultPrompts.includes(index));
     
     const allPrompts = [...defaultPrompts, ...customPrompts];
@@ -411,7 +448,7 @@ export function BrandMonitor({
     } finally {
       dispatch({ type: 'SET_ANALYZING', payload: false });
     }
-  }, [company, removedDefaultPrompts, customPrompts, identifiedCompetitors, startSSEConnection, creditsAvailable]);
+  }, [company, removedDefaultPrompts, customPrompts, identifiedCompetitors, aiCompetitors, startSSEConnection, creditsAvailable]);
   
   const handleRestart = useCallback(() => {
     dispatch({ type: 'RESET_STATE' });
@@ -466,7 +503,9 @@ export function BrandMonitor({
                 onAnalyze={handlePrepareAnalysis}
                 analyzing={preparingAnalysis}
                 showCompetitors={showCompetitors}
-                identifiedCompetitors={identifiedCompetitors}
+                identifiedCompetitors={competitorCards}
+                aiCompetitors={aiCompetitors}
+                scrapingCompetitors={scrapingCompetitors}
                 onRemoveCompetitor={(idx) => dispatch({ type: 'REMOVE_COMPETITOR', payload: idx })}
                 onAddCompetitor={() => {
                   dispatch({ type: 'TOGGLE_MODAL', payload: { modal: 'addCompetitor', show: true } });

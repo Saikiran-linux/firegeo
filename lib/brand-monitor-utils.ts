@@ -140,36 +140,78 @@ export function detectServiceType(company: Company): string {
   const desc = (company.description || '').toLowerCase();
   const content = (company.scrapedData?.mainContent || '').toLowerCase();
   const companyName = (company.name || '').toLowerCase();
-  
-  // Check for specific industries first
-  if (desc.includes('beverage') || desc.includes('drink') || desc.includes('cola') || desc.includes('soda') ||
-      content.includes('beverage') || content.includes('refreshment') || companyName.includes('coca') || companyName.includes('pepsi')) {
+  const industry = (company.industry || '').toLowerCase();
+  const combined = `${desc} ${content} ${industry} ${companyName}`;
+
+  const includesAny = (text: string, terms: string[]) => terms.some(term => text.includes(term));
+
+  // Developer & product tooling first so UI libraries aren't misclassified
+  if (
+    includesAny(combined, ['component library', 'design system', 'ui kit', 'ui components', 'frontend toolkit']) ||
+    includesAny(industry, ['developer', 'frontend', 'ui', 'design']) ||
+    includesAny(desc, ['developer tool', 'developer toolkit', 'design system'])
+  ) {
+    return 'developer tool';
+  }
+
+  // Check for specific industries with stronger context requirements
+  if (includesAny(combined, ['beverage', 'drink', 'cola', 'soda', 'refreshment'])) {
     return 'beverage brand';
-  } else if (desc.includes('restaurant') || desc.includes('food') || desc.includes('dining') ||
-      content.includes('menu') || content.includes('restaurant')) {
+  }
+
+  const restaurantSignals = includesAny(combined, ['restaurant', 'food', 'dining', 'cuisine', 'chef', 'culinary']);
+  const hasMenuContext = content.includes(' menu ') || content.includes(' menu\n') || content.includes('\nmenu ');
+  if (restaurantSignals || (hasMenuContext && includesAny(combined, ['restaurant', 'dining', 'cuisine']))) {
     return 'restaurant';
-  } else if (desc.includes('retail') || desc.includes('store') || desc.includes('shopping') ||
-      content.includes('retail') || content.includes('shopping')) {
+  }
+
+  if (includesAny(combined, ['retail', 'store', 'shopping', 'brick-and-mortar'])) {
     return 'retailer';
-  } else if (desc.includes('bank') || desc.includes('financial') || desc.includes('finance') ||
-      content.includes('banking') || content.includes('financial services')) {
+  }
+
+  if (includesAny(combined, ['bank', 'financial', 'finance', 'fintech', 'banking', 'financial services'])) {
     return 'financial service';
-  } else if (desc.includes('scraping') || desc.includes('crawl') || desc.includes('extract') ||
-      content.includes('web scraping') || content.includes('data extraction')) {
+  }
+
+  if (includesAny(combined, ['scraping', 'crawler', 'data extraction', 'web scraping', 'data collection'])) {
     return 'web scraper';
-  } else if (desc.includes('ai') || desc.includes('artificial intelligence') || desc.includes('llm') ||
-      content.includes('machine learning') || content.includes('ai-powered')) {
+  }
+
+  if (includesAny(combined, ['artificial intelligence', 'machine learning', 'ai-powered', 'llm', 'ai tool'])) {
     return 'AI tool';
-  } else if (desc.includes('hosting') || desc.includes('deploy') || desc.includes('cloud') ||
-      content.includes('deployment') || content.includes('infrastructure')) {
+  }
+
+  if (includesAny(combined, ['hosting', 'deploy', 'deployment', 'cloud', 'infrastructure'])) {
     return 'hosting platform';
-  } else if (desc.includes('e-commerce') || desc.includes('online store') || desc.includes('marketplace')) {
+  }
+
+  if (includesAny(combined, ['e-commerce', 'online store', 'marketplace'])) {
     return 'e-commerce platform';
-  } else if (desc.includes('software') || desc.includes('saas') || desc.includes('platform')) {
+  }
+
+  if (includesAny(combined, ['software', 'saas', 'platform', 'application'])) {
     return 'software';
   }
-  // More generic default
+
+  // Fallback: use industry if available, otherwise generic brand
+  if (industry) {
+    return industry.endsWith('s') ? industry.slice(0, -1) : industry;
+  }
+
   return 'brand';
+}
+
+export function formatServiceTypeForPrompt(serviceType: string): string {
+  const lower = serviceType.toLowerCase();
+
+  if (lower.includes('developer tool')) return 'developer tools';
+  if (lower.includes('tool')) return `${serviceType} tools`;
+  if (lower.includes('platform')) return `${serviceType}s`;
+  if (lower.includes('library')) return `${serviceType}s`;
+  if (lower.includes('brand') || lower.includes('company')) return `${serviceType} brands`;
+  if (lower.endsWith('s')) return serviceType;
+
+  return `${serviceType}s`;
 }
 
 export function getIndustryCompetitors(industry: string): { name: string; url?: string }[] {

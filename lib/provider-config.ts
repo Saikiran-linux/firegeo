@@ -56,7 +56,7 @@ export interface ProviderConfig {
 export const PROVIDER_ENABLED_CONFIG: Record<string, boolean> = {
   openai: true,      // OpenAI is enabled
   anthropic: true,   // Anthropic is enabled
-  google: false,     // Google is disabled
+  google: true,      // Google is enabled
   perplexity: true,  // Perplexity is enabled
 };
 
@@ -204,7 +204,16 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     },
     getModel: (modelId?: string, options?: any) => {
       if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return null;
-      return google(modelId || PROVIDER_CONFIGS.google.defaultModel);
+      const model = google(modelId || PROVIDER_CONFIGS.google.defaultModel);
+      
+      // Enable search grounding for web search
+      if (options?.useWebSearch) {
+        return model.withConfig({
+          useSearchGrounding: true
+        });
+      }
+      
+      return model;
     },
     isConfigured: () => !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   },
