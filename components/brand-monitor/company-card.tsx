@@ -26,7 +26,7 @@ interface CompanyCardProps {
   }>;
   aiCompetitors?: string[];
   scrapingCompetitors?: boolean;
-  onRemoveCompetitor?: (index: number) => void;
+  onRemoveCompetitor?: (name: string) => void;
   onAddCompetitor?: () => void;
   onContinueToAnalysis?: () => void;
 }
@@ -264,7 +264,7 @@ export function CompanyCard({
                     {/* Remove button */}
                     {onRemoveCompetitor && (
                       <button
-                        onClick={() => onRemoveCompetitor(idx)}
+                        onClick={() => onRemoveCompetitor(competitor.name)}
                         className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
                       >
                         <Trash2 className="w-3.5 h-3.5 text-red-600" />

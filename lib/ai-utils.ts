@@ -1,6 +1,6 @@
-import { generateText, generateObject } from 'ai';
+import { generateText, generateObject, LanguageModel } from 'ai';
 import { z } from 'zod';
-import { Company, BrandPrompt, AIResponse, CompanyRanking, CompetitorRanking, ProviderSpecificRanking, ProviderComparisonData, ProgressCallback, CompetitorFoundData } from './types';
+import { Company, CompanyInput, BrandPrompt, AIResponse, CompanyRanking, CompetitorRanking, ProviderSpecificRanking, ProviderComparisonData, ProgressCallback, CompetitorFoundData } from './types';
 import { getProviderModel, normalizeProviderName, isProviderConfigured, getConfiguredProviders, getProviderConfig, PROVIDER_CONFIGS } from './provider-config';
 import { detectBrandMention, detectMultipleBrands, BrandDetectionOptions } from './brand-detection-utils';
 import { getBrandDetectionOptions } from './brand-detection-config';
@@ -14,7 +14,7 @@ const RankingSchema = z.object({
   })),
   analysis: z.object({
     brandMentioned: z.boolean(),
-    brandPosition: z.number().optional(),
+    brandPosition: z.number().nullable().optional(),
     competitors: z.array(z.string()),
     overallSentiment: z.enum(['positive', 'neutral', 'negative']),
     confidence: z.number().min(0).max(1),
@@ -32,7 +32,115 @@ const CompetitorSchema = z.object({
   })),
 });
 
-export async function identifyCompetitors(company: Company, progressCallback?: ProgressCallback): Promise<string[]> {
+const PROMPT_CATEGORY_VALUES = ['ranking', 'comparison', 'alternatives', 'recommendations'] as const;
+
+const PromptGenerationSchema = z.object({
+  prompts: z.array(z.object({
+    prompt: z.string().min(10),
+    category: z.enum(PROMPT_CATEGORY_VALUES),
+  })).min(4).max(8),
+});
+
+function buildAudienceVariants(company: Company) {
+  const industry = company.industry?.toLowerCase() || '';
+  const variants: string[] = [];
+
+  if (industry.includes('developer') || industry.includes('software')) {
+    variants.push('software engineering leaders', 'CTOs evaluating tools');
+  }
+
+  if (industry.includes('marketing')) {
+    variants.push('growth marketers researching solutions');
+  }
+
+  if (industry.includes('commerce') || industry.includes('retail')) {
+    variants.push('ecommerce operators comparing platforms');
+  }
+
+  if (company.scrapedData?.mainProducts?.length) {
+    variants.push(`buyers looking for ${company.scrapedData.mainProducts[0]}`);
+  }
+
+  const keywords = company.scrapedData?.keywords || [];
+  if (keywords.length) {
+    variants.push(`${keywords[0]} practitioners`);
+  }
+
+  return Array.from(new Set(variants)).slice(0, 3);
+}
+
+function mergePromptSets(promptSets: BrandPrompt[][], company: Company, competitors: string[]): BrandPrompt[] {
+  if (!promptSets.length) {
+    return [];
+  }
+
+  const promptsMap = new Map<string, BrandPrompt>();
+
+  promptSets.flat().forEach((prompt) => {
+    // Use the prompt as-is without adding brand names or competitor names
+    // The AI has already generated natural, user-focused queries
+    const text = prompt.prompt.trim();
+    
+    const normalized = text;
+    if (!promptsMap.has(normalized)) {
+      promptsMap.set(normalized, {
+        ...prompt,
+        prompt: normalized,
+      });
+    }
+  });
+
+  const uniquePrompts = Array.from(promptsMap.values());
+
+  // Guarantee at least one prompt per category if possible
+  const categories = new Set(uniquePrompts.map((p) => p.category));
+
+  PROMPT_CATEGORY_VALUES.forEach((category) => {
+    if (!categories.has(category)) {
+      const fallbackPrompt = buildCategoryFallbackPrompt(category, company, competitors);
+      uniquePrompts.push(fallbackPrompt);
+    }
+  });
+
+  return uniquePrompts.slice(0, 8);
+}
+
+function buildCategoryFallbackPrompt(category: BrandPrompt['category'], company: Company, competitors: string[]): BrandPrompt {
+  const product = company.scrapedData?.mainProducts?.[0] || company.industry || 'solution';
+  const industry = company.industry || 'technology';
+  const currentYear = new Date().getFullYear();
+
+  // Generate natural, brand-agnostic fallback prompts
+  switch (category) {
+    case 'ranking':
+      return {
+        id: `fallback-${category}`,
+        category,
+        prompt: `What are the best ${product} options in ${currentYear}?`,
+      };
+    case 'comparison':
+      return {
+        id: `fallback-${category}`,
+        category,
+        prompt: `Top ${product} platforms for ${industry} businesses?`,
+      };
+    case 'alternatives':
+      return {
+        id: `fallback-${category}`,
+        category,
+        prompt: `Which ${product} should I choose for my project?`,
+      };
+    case 'recommendations':
+    default:
+      return {
+        id: `fallback-${category}`,
+        category: 'recommendations',
+        prompt: `I need a ${product} for my team, what do you recommend?`,
+      };
+  }
+}
+
+export async function identifyCompetitors(company: CompanyInput, progressCallback?: ProgressCallback): Promise<string[]> {
   try {
     // PRIORITY 1: Try to use Perplexity for research (has built-in web search)
     const perplexityProvider = getProviderConfig('perplexity');
@@ -286,133 +394,174 @@ async function detectIndustryFromContent(company: Company): Promise<string> {
 }
 
 export async function generatePromptsForCompany(company: Company, competitors: string[]): Promise<BrandPrompt[]> {
-  const prompts: BrandPrompt[] = [];
-  let promptId = 0;
+  const promptContext = buildPromptGenerationPrompt(company, competitors);
 
-  const brandName = company.name;
-  
-  // Extract context from scraped data
-  const scrapedData = company.scrapedData;
-  const keywords = scrapedData?.keywords || [];
-  const mainProducts = scrapedData?.mainProducts || [];
-  const description = scrapedData?.description || company.description || '';
-  
-  // Debug log to see what data we're working with
-  console.log('Generating prompts for:', {
-    brandName,
-    industry: company.industry,
-    mainProducts,
-    keywords: keywords.slice(0, 5),
-    competitors: competitors.slice(0, 5)
-  });
-  
-  // Build a more specific context from the scraped data
-  let productContext = '';
-  let categoryContext = '';
-  
-  // If we have specific products, use those first
-  if (mainProducts.length > 0) {
-    productContext = mainProducts.slice(0, 2).join(' and ');
-    // Infer category from products
-    const productsLower = mainProducts.join(' ').toLowerCase();
-    if (productsLower.includes('cooler') || productsLower.includes('drinkware')) {
-      categoryContext = 'outdoor gear brands';
-    } else if (productsLower.includes('software') || productsLower.includes('api')) {
-      categoryContext = 'software companies';
-    } else {
-      categoryContext = `${mainProducts[0]} brands`;
+  const openAIModel = getProviderModel('openai', 'gpt-5') || getProviderModel('openai', 'gpt-4o');
+  const perplexityModel = getProviderModel('perplexity', 'sonar-pro');
+
+  if (!openAIModel && !perplexityModel) {
+    console.warn('[generatePromptsForCompany] No high-tier providers configured (OpenAI GPT-5 or Perplexity Sonar Pro). Falling back to heuristics.');
+    return getHeuristicPrompts(company, competitors);
+  }
+
+  const promptSets: BrandPrompt[][] = [];
+
+  const runPromptGeneration = async (model: LanguageModel | null, label: string): Promise<void> => {
+    if (!model) {
+      return;
     }
-  }
-  
-  // Analyze keywords and description to understand what the company actually does
-  const keywordsLower = keywords.map(k => k.toLowerCase());
-  const descLower = description.toLowerCase();
-  const allContext = `${keywordsLower.join(' ')} ${descLower} ${mainProducts.join(' ')}`;
-  const industryLower = (company.industry || '').toLowerCase();
 
-  const containsAny = (haystack: string, needles: string[]) =>
-    needles.some(needle => haystack.includes(needle));
- 
-  // Only determine category if we don't already have it from mainProducts
-  if (!productContext) {
-    // Check industry first for more accurate categorization
-    if (industryLower === 'outdoor gear' || containsAny(allContext, ['cooler', 'drinkware', 'tumbler', 'outdoor'])) {
-      productContext = 'coolers and drinkware';
-      categoryContext = 'outdoor gear brands';
-    } else if (industryLower === 'web scraping' || containsAny(allContext, ['web scraping', 'data extraction', 'crawler'])) {
-      productContext = 'web scraping tools';
-      categoryContext = 'data extraction services';
-    } else if (containsAny(allContext, ['ai', 'artificial intelligence', 'machine learning', 'llm'])) {
-      productContext = 'AI tools';
-      categoryContext = 'artificial intelligence platforms';
-    } else if (containsAny(allContext, ['ui component', 'component library', 'design system', 'ui library'])) {
-      productContext = 'UI component libraries';
-      categoryContext = 'frontend developer tools';
-    } else if (containsAny(allContext, ['software', 'saas', 'application', 'platform']) || containsAny(industryLower, ['software', 'saas'])) {
-      productContext = 'software solutions';
-      categoryContext = 'SaaS platforms';
-    } else if (containsAny(allContext, ['clothing', 'apparel', 'fashion'])) {
-      productContext = 'clothing and apparel';
-      categoryContext = 'fashion brands';
-    } else if (containsAny(allContext, ['furniture', 'home', 'decor'])) {
-      productContext = 'furniture and home goods';
-      categoryContext = 'home furnishing brands';
-    } else if (containsAny(allContext, ['restaurant', 'dining', 'cuisine', 'menu', 'food'])) {
-      productContext = 'restaurant experiences';
-      categoryContext = 'dining brands';
-    } else {
-      // Fallback: derive context from industry-aligned keywords
-      const filteredKeywords = keywordsLower.filter(keyword => !containsAny(keyword, ['restaurant', 'food', 'dining']));
-      const baseKeyword = filteredKeywords[0] || industryLower || 'products';
-      productContext = baseKeyword.includes(' ') ? baseKeyword : `${baseKeyword} solutions`;
-      categoryContext = industryLower || 'brands';
+    try {
+      const { object } = await generateObject({
+        model,
+        schema: PromptGenerationSchema,
+        temperature: 0.5,
+        prompt: promptContext,
+        maxRetries: 3,
+      });
+
+      const prompts = object.prompts.map((entry, index) => ({
+        id: `${label}-${index + 1}`,
+        prompt: entry.prompt.trim(),
+        category: entry.category,
+      }));
+
+      promptSets.push(prompts);
+    } catch (error) {
+      console.error(`[generatePromptsForCompany] Prompt generation failed for ${label}:`, error);
     }
-  }
-  
-  // Safety check: if we somehow got "beverage" but it's clearly not a beverage company
-  if (productContext.includes('beverage') && (brandName.toLowerCase() === 'yeti' || allContext.includes('cooler'))) {
-    productContext = 'coolers and outdoor gear';
-    categoryContext = 'outdoor equipment brands';
-  }
-
-  // Generate contextually relevant prompts
-  const contextualTemplates = {
-    ranking: [
-      `best ${productContext} in 2024`,
-      `top ${categoryContext} ranked by quality`,
-      mainProducts.length > 0 ? `most recommended ${mainProducts[0]}` : `most recommended ${productContext}`,
-      keywords.length > 0 ? `best brands for ${keywords[0]}` : `popular ${categoryContext}`,
-    ],
-    comparison: [
-      `${brandName} vs ${competitors.slice(0, 2).join(' vs ')} for ${productContext}`,
-      `how does ${brandName} compare to other ${categoryContext}`,
-      competitors[0] && mainProducts[0] ? `${competitors[0]} or ${brandName} which has better ${mainProducts[0]}` : `${brandName} compared to alternatives`,
-    ],
-    alternatives: [
-      `alternatives to ${brandName} ${mainProducts[0] || productContext}`,
-      `${categoryContext} similar to ${brandName}`,
-      `competitors of ${brandName} in ${productContext.split(' ')[0]} market`,
-    ],
-    recommendations: [
-      mainProducts.length > 0 ? `is ${brandName} ${mainProducts[0]} worth buying` : `is ${brandName} worth it for ${productContext}`,
-      `${brandName} ${productContext} reviews and recommendations`,
-      `should I buy ${brandName} or other ${categoryContext}`,
-      `best ${productContext} for ${keywords.includes('professional') ? 'professionals' : keywords.includes('outdoor') ? 'outdoor enthusiasts' : 'everyday use'}`,
-    ],
   };
 
-  // Generate prompts from contextual templates
-  Object.entries(contextualTemplates).forEach(([category, templates]) => {
-    templates.forEach(prompt => {
-      prompts.push({
-        id: (++promptId).toString(),
-        prompt,
-        category: category as BrandPrompt['category'],
-      });
-    });
-  });
+  await Promise.all([
+    runPromptGeneration(openAIModel, 'openai'),
+    runPromptGeneration(perplexityModel, 'perplexity'),
+  ]);
 
-  return prompts;
+  const mergedPrompts = mergePromptSets(promptSets, company, competitors);
+
+  if (!mergedPrompts.length) {
+    console.warn('[generatePromptsForCompany] No prompts generated from providers, reverting to heuristics.');
+    return getHeuristicPrompts(company, competitors);
+  }
+
+  return mergedPrompts;
+}
+
+function buildPromptGenerationPrompt(company: Company, competitors: string[]): string {
+  const keywords = company.scrapedData?.keywords?.slice(0, 8) || [];
+  const mainProducts = company.scrapedData?.mainProducts?.slice(0, 6) || [];
+  const description = company.scrapedData?.description || company.description || 'No description provided.';
+  const industry = company.industry || 'Unknown industry';
+
+  const siteSignals = [
+    company.scrapedData?.title,
+    company.scrapedData?.description,
+    company.scrapedData?.mainContent,
+  ]
+    .filter(Boolean)
+    .map(text => `• ${String(text).slice(0, 240)}`)
+    .join('\n') || 'No crawl data available';
+
+  const competitorList = competitors.length
+    ? competitors.map(name => `- ${name}`).join('\n')
+    : 'None identified';
+
+  const keywordList = keywords.length ? keywords.join(', ') : 'None';
+  const productList = mainProducts.length ? mainProducts.join(', ') : 'Unknown';
+
+  return `You are a search intent expert. Generate realistic search queries that potential customers would ask when looking for solutions in the ${industry} space.
+
+Company Context (for understanding the market, NOT to include in prompts):
+Industry: ${industry}
+Description: ${description}
+Products/Services: ${productList}
+Keywords: ${keywordList}
+
+ABSOLUTE RULES - NEVER BREAK THESE:
+1. DO NOT include "${company.name}" anywhere in any prompt
+2. DO NOT include "Include ${company.name}" or any variation
+3. DO NOT mention ANY specific brand names (including competitors: ${competitors.map(c => c).join(', ')})
+4. DO NOT say "as a focal option" or "Address perspectives" - these are not natural
+5. Write as if you're a customer who has NEVER heard of ${company.name}
+
+Generate natural queries that a real customer would type into ChatGPT, Perplexity, or Google when:
+- Looking for solutions in this space
+- Comparing options
+- Seeking recommendations
+- Researching best practices
+
+Include contextual details like:
+- User persona (beginner, professional, small business, enterprise, etc.)
+- Specific use case or requirement
+- Constraints (budget, location, scale, technical level)
+- Time relevance (2025, current year, etc.)
+
+Query Pattern Examples:
+- "What's the best [category] for [use case] in [year]?"
+- "I need a [product] that can [requirement], any recommendations?"
+- "Top [category] for [user type] with [constraint]?"
+- "Which [product] should I use for [specific scenario]?"
+- "Comparing [category] options for [use case]"
+- "Best [category] for [location/industry] businesses?"
+
+GOOD Examples (natural, brand-agnostic):
+✓ "What's the best web scraping tool for e-commerce price monitoring in 2025?"
+✓ "I need project management software for a remote team of 20, under $500/month"
+✓ "Top CRM platforms for real estate agents with mobile apps?"
+✓ "Which video editing software is easiest for YouTube beginners?"
+✓ "Best accounting software for freelancers with invoicing features?"
+
+BAD Examples (do NOT generate):
+✗ "What's the best place to buy jewelry? Include Acme Jewelers" (mentions brand)
+✗ "How does Shopify compare to WooCommerce?" (mentions specific brands)
+✗ "Include [CompanyName] as a focal option" (unnatural, mentions brand)
+✗ "Address perspectives from buyers" (not how humans talk)
+
+Output format (JSON):
+{
+  "prompts": [
+    { "prompt": "...", "category": "ranking" | "comparison" | "alternatives" | "recommendations" }
+  ]
+}
+
+Generate 4-8 diverse, natural prompts. Focus on the customer's problem, NOT on any specific brand.`;
+}
+
+function getHeuristicPrompts(company: Company, competitors: string[]): BrandPrompt[] {
+  const prompts: BrandPrompt[] = [];
+  let idCounter = 0;
+
+  const industry = company.industry || 'technology';
+  const keywords = company.scrapedData?.keywords || [];
+  const mainProducts = company.scrapedData?.mainProducts || [];
+  const primaryProduct = mainProducts[0] || keywords[0] || industry;
+  const currentYear = new Date().getFullYear();
+
+  const pushPrompt = (category: BrandPrompt['category'], prompt: string) => {
+    prompts.push({ id: (++idCounter).toString(), category, prompt });
+  };
+
+  // Generate natural, brand-agnostic queries
+  pushPrompt('ranking', `What are the best ${primaryProduct} tools in ${currentYear}?`);
+  pushPrompt('recommendations', `I need a ${primaryProduct} solution for my startup, what do you recommend?`);
+  pushPrompt('comparison', `Top ${primaryProduct} options for small businesses?`);
+  pushPrompt('alternatives', `Which ${primaryProduct} should I choose for my team?`);
+
+  // Add context-specific prompts if we have keywords
+  if (keywords.length > 0) {
+    pushPrompt('ranking', `Best ${primaryProduct} for ${keywords[0]} use cases?`);
+  }
+  
+  if (keywords.length > 1) {
+    pushPrompt('recommendations', `Looking for a ${primaryProduct} with ${keywords[1]} capabilities`);
+  }
+
+  // Add user-type specific prompts
+  const userTypes = ['developers', 'beginners', 'enterprise teams', 'freelancers'];
+  const randomUserType = userTypes[Math.floor(Math.random() * userTypes.length)];
+  pushPrompt('ranking', `Top ${primaryProduct} for ${randomUserType}?`);
+
+  return prompts.slice(0, 6); // Return max 6 prompts
 }
 
 export async function analyzePromptWithProvider(
@@ -510,7 +659,7 @@ Examples of mentions to catch:
     let object;
     try {
       // Use a fast model for structured output if available
-      const structuredModel = normalizedProvider === 'anthropic' 
+      const structuredModel = (normalizedProvider === 'anthropic' || normalizedProvider === 'google')
         ? getProviderModel('openai', 'gpt-4o-mini') || model
         : model;
       
@@ -553,7 +702,7 @@ Look for mentions of "${brandName}" and competitors: ${competitors.join(', ')}
 
 Return ONLY the JSON object, no other text.`;
 
-        const structuredModel = normalizedProvider === 'anthropic' 
+        const structuredModel = (normalizedProvider === 'anthropic' || normalizedProvider === 'google')
           ? getProviderModel('openai', 'gpt-4o-mini') || model
           : model;
         
@@ -765,7 +914,7 @@ Return a simple analysis:
       rankings,
       competitors: relevantCompetitors,
       brandMentioned,
-      brandPosition: object.analysis.brandPosition,
+    brandPosition: object.analysis.brandPosition ?? undefined,
       sentiment: object.analysis.overallSentiment,
       confidence: object.analysis.confidence,
       timestamp: new Date(),

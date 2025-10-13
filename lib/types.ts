@@ -70,6 +70,8 @@ export interface Company {
   };
 }
 
+export type CompanyInput = Pick<Company, 'name'> & Partial<Omit<Company, 'id'>>;
+
 export interface AIProvider {
   name: string;
   model: string;

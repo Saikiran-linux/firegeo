@@ -1,12 +1,13 @@
 import { useRef, useEffect } from 'react';
+import type { BrandPrompt } from '@/lib/types';
 import { BrandMonitorState, BrandMonitorAction } from '@/lib/brand-monitor-reducer';
 import { SSEParser } from '@/lib/sse-parser';
-import { 
-  ProgressData, 
-  CompetitorFoundData, 
-  PromptGeneratedData, 
-  AnalysisProgressData, 
-  PartialResultData 
+import {
+  ProgressData,
+  CompetitorFoundData,
+  PromptGeneratedData,
+  AnalysisProgressData,
+  PartialResultData,
 } from '@/lib/types';
 
 interface UseSSEHandlerProps {
@@ -94,6 +95,18 @@ export function useSSEHandler({ state, dispatch, onCreditsUpdate, onAnalysisComp
           dispatch({
             type: 'SET_ANALYZING_PROMPTS',
             payload: [...existingPrompts, promptData.prompt]
+          });
+
+          dispatch({
+            type: 'SET_GENERATED_PROMPTS',
+            payload: [
+              ...state.generatedPrompts,
+              {
+                id: `generated-${promptData.index}`,
+                prompt: promptData.prompt,
+                category: promptData.category || 'recommendations',
+              } as BrandPrompt,
+            ],
           });
           
           // Initialize prompt completion status

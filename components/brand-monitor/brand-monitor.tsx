@@ -107,6 +107,7 @@ export function BrandMonitor({
     showPromptsList,
     showCompetitors,
     customPrompts,
+    generatedPrompts,
     removedDefaultPrompts,
     identifiedCompetitors,
     aiCompetitors,
@@ -363,18 +364,46 @@ export function BrandMonitor({
     }
   }, [company]);
   
-  const handleProceedToPrompts = useCallback(() => {
+  const handleProceedToPrompts = useCallback(async () => {
+    if (!company) return;
+    
     // Add a fade-out class to the current view
     const currentView = document.querySelector('.animate-panel-in');
     if (currentView) {
       currentView.classList.add('opacity-0');
     }
     
-    setTimeout(() => {
+    setTimeout(async () => {
       dispatch({ type: 'SET_SHOW_COMPETITORS', payload: false });
       dispatch({ type: 'SET_SHOW_PROMPTS_LIST', payload: true });
+      
+      // Generate prompts for the company using AI
+      try {
+        console.log('Generating prompts for company:', company.name);
+        const response = await fetch('/api/brand-monitor/generate-prompts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            company,
+            competitors: identifiedCompetitors.map(c => c.name)
+          }),
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Generated prompts:', data.prompts);
+          if (data.prompts && data.prompts.length > 0) {
+            dispatch({ type: 'SET_GENERATED_PROMPTS', payload: data.prompts });
+          }
+        } else {
+          console.warn('Failed to generate prompts, using defaults');
+        }
+      } catch (error) {
+        console.error('Error generating prompts:', error);
+        // Fallback to defaults if generation fails
+      }
     }, 300);
-  }, []);
+  }, [company, identifiedCompetitors]);
   
   const handleAnalyze = useCallback(async () => {
     if (!company) return;
@@ -397,13 +426,15 @@ export function BrandMonitor({
     const serviceType = detectServiceType(company);
     const serviceTypeForPrompt = formatServiceTypeForPrompt(serviceType);
     const currentYear = new Date().getFullYear();
-    const defaultPrompts = [
-      `Best ${serviceTypeForPrompt} in ${currentYear}?`,
-      `Top ${serviceTypeForPrompt} for startups?`,
-      `Most popular ${serviceTypeForPrompt} today?`,
-      `Recommended ${serviceTypeForPrompt} for developers?`
-    ].filter((_, index) => !removedDefaultPrompts.includes(index));
-    
+  const defaultPrompts = generatedPrompts.length
+      ? generatedPrompts.map(prompt => prompt.prompt)
+      : [
+          `What are the best ${serviceTypeForPrompt} in ${currentYear}?`,
+          `I need a ${serviceType} for my startup, what do you recommend?`,
+          `Top ${serviceTypeForPrompt} for small businesses?`,
+          `Which ${serviceType} should I choose for my team?`
+        ].filter((_, index) => !removedDefaultPrompts.includes(index));
+
     const allPrompts = [...defaultPrompts, ...customPrompts];
     
     // Store the prompts for UI display - make sure they're normalized
@@ -448,7 +479,7 @@ export function BrandMonitor({
     } finally {
       dispatch({ type: 'SET_ANALYZING', payload: false });
     }
-  }, [company, removedDefaultPrompts, customPrompts, identifiedCompetitors, aiCompetitors, startSSEConnection, creditsAvailable]);
+  }, [company, generatedPrompts, removedDefaultPrompts, customPrompts, identifiedCompetitors, aiCompetitors, startSSEConnection, creditsAvailable]);
   
   const handleRestart = useCallback(() => {
     dispatch({ type: 'RESET_STATE' });
@@ -506,7 +537,7 @@ export function BrandMonitor({
                 identifiedCompetitors={competitorCards}
                 aiCompetitors={aiCompetitors}
                 scrapingCompetitors={scrapingCompetitors}
-                onRemoveCompetitor={(idx) => dispatch({ type: 'REMOVE_COMPETITOR', payload: idx })}
+                onRemoveCompetitor={(name) => dispatch({ type: 'REMOVE_COMPETITOR', payload: { name } })}
                 onAddCompetitor={() => {
                   dispatch({ type: 'TOGGLE_MODAL', payload: { modal: 'addCompetitor', show: true } });
                   dispatch({ type: 'SET_NEW_COMPETITOR', payload: { name: '', url: '' } });
@@ -532,6 +563,7 @@ export function BrandMonitor({
           customPrompts={customPrompts}
           removedDefaultPrompts={removedDefaultPrompts}
           promptCompletionStatus={promptCompletionStatus}
+          generatedPrompts={generatedPrompts}
           onRemoveDefaultPrompt={(index) => dispatch({ type: 'REMOVE_DEFAULT_PROMPT', payload: index })}
           onRemoveCustomPrompt={(prompt) => {
             dispatch({ type: 'SET_CUSTOM_PROMPTS', payload: customPrompts.filter(p => p !== prompt) });

@@ -1,4 +1,4 @@
-import { Company, CompetitorRanking, AnalysisStage, PartialResultData } from './types';
+import { Company, BrandPrompt, CompetitorRanking, AnalysisStage, PartialResultData } from './types';
 
 // Action Types
 export type BrandMonitorAction =
@@ -17,10 +17,11 @@ export type BrandMonitorAction =
   | { type: 'ADD_CUSTOM_PROMPT'; payload: string }
   | { type: 'REMOVE_DEFAULT_PROMPT'; payload: number }
   | { type: 'SET_AVAILABLE_PROVIDERS'; payload: string[] }
+  | { type: 'SET_GENERATED_PROMPTS'; payload: BrandPrompt[] }
   | { type: 'SET_IDENTIFIED_COMPETITORS'; payload: IdentifiedCompetitor[] }
   | { type: 'SET_AI_COMPETITORS'; payload: string[] }
   | { type: 'SET_SCRAPING_COMPETITORS'; payload: boolean }
-  | { type: 'REMOVE_COMPETITOR'; payload: number }
+  | { type: 'REMOVE_COMPETITOR'; payload: { name: string } }
   | { type: 'ADD_COMPETITOR'; payload: IdentifiedCompetitor }
   | { type: 'UPDATE_COMPETITOR_METADATA'; payload: { index: number; metadata: CompetitorMetadata } }
   | { type: 'SET_ANALYSIS_PROGRESS'; payload: AnalysisProgressState }
@@ -133,6 +134,7 @@ export interface BrandMonitorState {
   customPrompts: string[];
   removedDefaultPrompts: number[];
   analyzingPrompts: string[];
+  generatedPrompts: BrandPrompt[];
   
   // Competitors
   identifiedCompetitors: IdentifiedCompetitor[];
@@ -178,6 +180,7 @@ export const initialBrandMonitorState: BrandMonitorState = {
   customPrompts: [],
   removedDefaultPrompts: [],
   analyzingPrompts: [],
+  generatedPrompts: [],
   identifiedCompetitors: [],
   aiCompetitors: [],
   availableProviders: [],
@@ -246,6 +249,9 @@ export function brandMonitorReducer(
       
     case 'ADD_CUSTOM_PROMPT':
       return { ...state, customPrompts: [...state.customPrompts, action.payload] };
+
+    case 'SET_GENERATED_PROMPTS':
+      return { ...state, generatedPrompts: action.payload };
       
     case 'REMOVE_DEFAULT_PROMPT':
       return { ...state, removedDefaultPrompts: [...state.removedDefaultPrompts, action.payload] };
@@ -265,8 +271,8 @@ export function brandMonitorReducer(
     case 'REMOVE_COMPETITOR':
       return { 
         ...state, 
-        identifiedCompetitors: state.identifiedCompetitors.filter((_, i) => i !== action.payload),
-        aiCompetitors: state.aiCompetitors.filter((_, i) => i !== action.payload)
+        identifiedCompetitors: state.identifiedCompetitors.filter((competitor) => competitor.name !== action.payload.name),
+        aiCompetitors: state.aiCompetitors.filter((competitor) => competitor !== action.payload.name)
       };
       
     case 'ADD_COMPETITOR':

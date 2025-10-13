@@ -1,4 +1,12 @@
+import pluralize from 'pluralize';
 import { Company } from './types';
+
+const customIndustrySingulars: Record<string, string> = {
+  news: 'news',
+  glass: 'glass',
+  electronics: 'electronics',
+  analytics: 'analytics',
+};
 
 export function validateUrl(url: string): boolean {
   try {
@@ -195,23 +203,89 @@ export function detectServiceType(company: Company): string {
 
   // Fallback: use industry if available, otherwise generic brand
   if (industry) {
-    return industry.endsWith('s') ? industry.slice(0, -1) : industry;
+    const normalizedIndustry = industry.trim();
+    if (!normalizedIndustry) return industry;
+
+    if (Object.prototype.hasOwnProperty.call(customIndustrySingulars, normalizedIndustry)) {
+      return customIndustrySingulars[normalizedIndustry];
+    }
+
+    const singularIndustry = pluralize.singular(normalizedIndustry);
+    return singularIndustry || industry;
   }
 
   return 'brand';
 }
 
 export function formatServiceTypeForPrompt(serviceType: string): string {
-  const lower = serviceType.toLowerCase();
+  const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const applyCase = (source: string, target: string) => {
+    if (!source) return target;
+    if (source === source.toUpperCase()) return target.toUpperCase();
+    if (source === source.toLowerCase()) return target.toLowerCase();
+    if (source[0] === source[0].toUpperCase() && source.slice(1) === source.slice(1).toLowerCase()) {
+      return target[0].toUpperCase() + target.slice(1).toLowerCase();
+    }
+    return target;
+  };
 
-  if (lower.includes('developer tool')) return 'developer tools';
-  if (lower.includes('tool')) return `${serviceType} tools`;
-  if (lower.includes('platform')) return `${serviceType}s`;
-  if (lower.includes('library')) return `${serviceType}s`;
-  if (lower.includes('brand') || lower.includes('company')) return `${serviceType} brands`;
-  if (lower.endsWith('s')) return serviceType;
+  const containsWholeWord = (text: string, word: string) => {
+    if (!word.trim()) return false;
+    const regex = new RegExp(`\\b${escapeRegex(word)}\\b`, 'i');
+    return regex.test(text);
+  };
 
-  return `${serviceType}s`;
+  const containsWholePhrase = (text: string, phrase: string) => {
+    if (!phrase.trim()) return false;
+    const regex = new RegExp(`\\b${escapeRegex(phrase)}\\b`, 'i');
+    return regex.test(text);
+  };
+
+  const replaceWholePhrase = (text: string, singular: string, plural: string) =>
+    text.replace(new RegExp(`\\b${escapeRegex(singular)}\\b`, 'gi'), match => applyCase(match, plural));
+
+  const replaceWholeWord = (text: string, singular: string, plural: string) =>
+    text.replace(new RegExp(`\\b${escapeRegex(singular)}\\b`, 'gi'), match => applyCase(match, plural));
+
+  let result = serviceType;
+
+  if (!containsWholePhrase(result, 'developer tools') && containsWholePhrase(result, 'developer tool')) {
+    result = replaceWholePhrase(result, 'developer tool', 'developer tools');
+  }
+
+  const convertSingularToPlural = (singular: string, plural: string) => {
+    if (containsWholeWord(result, plural)) {
+      return;
+    }
+    if (containsWholeWord(result, singular)) {
+      result = replaceWholeWord(result, singular, plural);
+    }
+  };
+
+  convertSingularToPlural('tool', 'tools');
+  convertSingularToPlural('platform', 'platforms');
+  convertSingularToPlural('library', 'libraries');
+  convertSingularToPlural('brand', 'brands');
+  convertSingularToPlural('company', 'companies');
+
+  const trimmed = result.trim();
+  if (!trimmed) return trimmed;
+
+  const words = trimmed.split(/\s+/);
+  const lastWord = words[words.length - 1];
+  if (!lastWord) return result;
+
+  const lowerLast = lastWord.toLowerCase();
+  if (lowerLast.endsWith('s')) {
+    return result;
+  }
+
+  const prior = words.slice(0, -1).join(' ');
+  if (!containsWholeWord(prior, lowerLast)) {
+    return `${result}s`;
+  }
+
+  return result;
 }
 
 export function getIndustryCompetitors(industry: string): { name: string; url?: string }[] {

@@ -129,6 +129,12 @@ async function analyzeResponseContent(
 }> {
   try {
     // Use Claude to analyze its own response with more explicit instructions
+    const escapedResponseText = responseText
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n');
+
     const analysisResponse = await client.messages.create({
       model: 'claude-3-5-haiku-latest', // Use a faster model for analysis
       max_tokens: 500,
@@ -146,7 +152,7 @@ async function analyzeResponseContent(
 }
 
 Response to analyze:
-"${responseText}"
+"${escapedResponseText}"
 
 Look for mentions of "${brandName}" and these competitors: ${competitors.join(', ')}
 
@@ -171,17 +177,44 @@ Return ONLY the JSON object, no other text.`,
     } catch (parseError) {
       console.error('Failed to parse JSON from Claude analysis:', parseError);
       // Extract JSON from text if it's wrapped in other text
-      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
-      } else {
+      const firstBraceIndex = analysisText.indexOf('{');
+      if (firstBraceIndex === -1) {
+        throw new Error('No valid JSON found in response');
+      }
+
+      let braceCount = 0;
+      let closingIndex = -1;
+
+      for (let i = firstBraceIndex; i < analysisText.length; i++) {
+        const char = analysisText[i];
+        if (char === '{') {
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            closingIndex = i;
+            break;
+          }
+        }
+      }
+
+      if (closingIndex === -1) {
+        throw new Error('No valid JSON found in response');
+      }
+
+      const jsonSubstring = analysisText.slice(firstBraceIndex, closingIndex + 1);
+
+      try {
+        analysis = JSON.parse(jsonSubstring);
+      } catch (extractedParseError) {
+        console.error('Failed to parse extracted JSON from Claude analysis:', extractedParseError);
         throw new Error('No valid JSON found in response');
       }
     }
 
     return {
       brandMentioned: analysis.brandMentioned || false,
-      brandPosition: analysis.brandPosition || undefined,
+      brandPosition: analysis.brandPosition ?? undefined,
       competitorsMentioned: analysis.competitorsMentioned || [],
       sentiment: analysis.sentiment || 'neutral',
       confidence: analysis.confidence || 0.5,

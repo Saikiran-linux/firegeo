@@ -25,6 +25,7 @@ interface AnalysisProgressSectionProps {
   onAddPromptClick: () => void;
   onStartAnalysis: () => void;
   detectServiceType: (company: Company) => string;
+  generatedPrompts?: { id: string; prompt: string; category: string }[];
 }
 
 // Provider icon mapping
@@ -84,19 +85,24 @@ export function AnalysisProgressSection({
   onRemoveCustomPrompt,
   onAddPromptClick,
   onStartAnalysis,
-  detectServiceType
+  detectServiceType,
+  generatedPrompts = []
 }: AnalysisProgressSectionProps) {
-  // Generate default prompts
+  // Generate default prompts only if no generated prompts are available
   const serviceType = detectServiceType(company);
   const currentYear = new Date().getFullYear();
-  const defaultPrompts = [
-    `Best ${serviceType}s in ${currentYear}?`,
-    `Top ${serviceType}s for startups?`,
-    `Most popular ${serviceType}s today?`,
-    `Recommended ${serviceType}s for developers?`
-  ].filter((_, index) => !removedDefaultPrompts.includes(index));
   
-  // Use provided prompts or generate from defaults + custom
+  // If we have generated prompts, use them; otherwise fall back to hardcoded defaults
+  const defaultPrompts = generatedPrompts.length > 0
+    ? generatedPrompts.map(p => p.prompt).filter((_, index) => !removedDefaultPrompts.includes(index))
+    : [
+        `What are the best ${serviceType}s in ${currentYear}?`,
+        `I need a ${serviceType} for my startup, what do you recommend?`,
+        `Top ${serviceType}s for small businesses?`,
+        `Which ${serviceType} should I choose for my team?`
+      ].filter((_, index) => !removedDefaultPrompts.includes(index));
+  
+  // Use provided prompts (during analysis) or generate from generated/defaults + custom (before analysis)
   const displayPrompts = prompts.length > 0 ? prompts : [...defaultPrompts, ...customPrompts];
   
   return (

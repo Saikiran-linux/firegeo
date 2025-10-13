@@ -2,6 +2,7 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import FirecrawlApp, {
   FirecrawlError,
+  type Action,
   type ScrapeParams,
   type ScrapeResponse,
 } from '@mendable/firecrawl-js';
@@ -19,7 +20,7 @@ const FALLBACK_TIMEOUT_MS = 45000;
 
 type FirecrawlStrategy = {
   name: string;
-  options: ScrapeParams;
+  options: ScrapeParams<z.ZodSchema, Action[]>;
 };
 
 interface ScrapePayload {
@@ -42,7 +43,8 @@ export class ScrapeServiceError extends Error {
 
 function sanitizeUrl(url: string): string {
   let normalized = url.trim();
-  if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(normalized);
+  if (!hasScheme) {
     normalized = `https://${normalized}`;
   }
   return normalized;
@@ -174,7 +176,7 @@ async function runFirecrawlStrategy(
       throw new ScrapeServiceError(
         response.error || `Firecrawl scrape failed (${strategy.name})`,
         'firecrawl',
-        response.metadata?.statusCode,
+        undefined,
         response,
       );
     }

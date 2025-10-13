@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Company } from '@/lib/types';
+import { CompanyInput } from '@/lib/types';
 import { generateObject } from 'ai';
 import { getProviderModel } from '@/lib/provider-config';
 import { z } from 'zod';
@@ -10,7 +10,7 @@ const CompetitorSchema = z.object({
   })).min(1),
 });
 
-const OPENAI_PROMPT_TEMPLATE = (company: Company) => `Identify 6-9 direct competitors of "${company.name}".
+const OPENAI_PROMPT_TEMPLATE = (company: CompanyInput) => `Identify 6-9 direct competitors of "${company.name}".
 
 Company Details:
 - Industry: ${company.industry || 'Technology'}
@@ -31,7 +31,7 @@ Return ONLY valid JSON matching this schema:
   ]
 }`;
 
-async function fetchWithOpenAI(company: Company): Promise<string[]> {
+async function fetchWithOpenAI(company: CompanyInput): Promise<string[]> {
   const model = getProviderModel('openai', 'gpt-4o-mini', { useWebSearch: true });
   if (!model) {
     throw new Error('OpenAI is not configured');
@@ -49,7 +49,7 @@ async function fetchWithOpenAI(company: Company): Promise<string[]> {
   return Array.from(new Set(object.competitors.map(entry => entry.name.trim()))).slice(0, 9);
 }
 
-const ANTHROPIC_PROMPT_TEMPLATE = (company: Company) => `Research the brand "${company.name}" and return 6-9 direct competitors.
+const ANTHROPIC_PROMPT_TEMPLATE = (company: CompanyInput) => `Research the brand "${company.name}" and return 6-9 direct competitors.
 
 Context:
 - Industry: ${company.industry || 'Technology'}
@@ -69,7 +69,7 @@ Respond with JSON matching this schema exactly:
   ]
 }`;
 
-async function fetchWithAnthropic(company: Company): Promise<string[]> {
+async function fetchWithAnthropic(company: CompanyInput): Promise<string[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Anthropic is not configured');
   }
@@ -90,11 +90,10 @@ async function fetchWithAnthropic(company: Company): Promise<string[]> {
   });
 
   const textContent = message.content
-    .filter((item): item is { type: 'text'; text: string } => item.type === 'text')
-    .map(item => item.text)
+    .flatMap(block => (block.type === 'text' ? [block.text] : []))
     .join('\n');
 
-  const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+  const jsonMatch = textContent.match(/\{[\s\S]*?\}/);
   if (!jsonMatch) {
     throw new Error('Anthropic response did not contain JSON');
   }
@@ -109,8 +108,8 @@ async function fetchWithAnthropic(company: Company): Promise<string[]> {
   return Array.from(new Set(parsed.competitors.map(entry => entry.name.trim()))).slice(0, 9);
 }
 
-export async function fetchCompetitorsWithWebSearch(company: Company): Promise<string[]> {
-  const strategies: Array<(company: Company) => Promise<string[]>> = [fetchWithOpenAI, fetchWithAnthropic];
+export async function fetchCompetitorsWithWebSearch(company: CompanyInput): Promise<string[]> {
+  const strategies: Array<(company: CompanyInput) => Promise<string[]>> = [fetchWithOpenAI, fetchWithAnthropic];
   const errors: unknown[] = [];
 
   for (const strategy of strategies) {

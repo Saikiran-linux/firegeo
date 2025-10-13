@@ -205,14 +205,21 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     getModel: (modelId?: string, options?: any) => {
       if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return null;
       const model = google(modelId || PROVIDER_CONFIGS.google.defaultModel);
-      
-      // Enable search grounding for web search
+
+      // Enable search grounding for web search when supported by SDK version
       if (options?.useWebSearch) {
-        return model.withConfig({
-          useSearchGrounding: true
-        });
+        const configurableModel = (model as any);
+        if (typeof configurableModel?.withConfig === 'function') {
+          try {
+            return configurableModel.withConfig({
+              useSearchGrounding: true,
+            });
+          } catch (error) {
+            console.warn('[provider-config] Failed to apply Google search grounding config, falling back to base model:', error);
+          }
+        }
       }
-      
+
       return model;
     },
     isConfigured: () => !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
