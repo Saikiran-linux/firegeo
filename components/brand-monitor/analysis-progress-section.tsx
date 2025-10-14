@@ -28,6 +28,13 @@ interface AnalysisProgressSectionProps {
   generatedPrompts?: { id: string; prompt: string; category: string }[];
 }
 
+// Type for display prompt items (used internally for ID-based operations)
+interface DisplayPromptItem {
+  id: string;
+  prompt: string;
+  isCustom?: boolean;
+}
+
 // Provider icon mapping
 const getProviderIcon = (provider: string) => {
   switch (provider) {
@@ -88,17 +95,22 @@ export function AnalysisProgressSection({
   detectServiceType,
   generatedPrompts = []
 }: AnalysisProgressSectionProps) {
-  const [copiedPromptIndex, setCopiedPromptIndex] = useState<number | null>(null);
+  const [copiedPromptText, setCopiedPromptText] = useState<string | null>(null);
   
   // Generate default prompts only if no generated prompts are available
   const serviceType = detectServiceType(company);
   const currentYear = new Date().getFullYear();
   
-  const handleCopyPrompt = async (promptText: string, index: number) => {
+  const handleCopyPrompt = async (promptText: string) => {
     try {
       await navigator.clipboard.writeText(promptText);
-      setCopiedPromptIndex(index);
-      setTimeout(() => setCopiedPromptIndex(null), 2000);
+      setCopiedPromptText(promptText);
+      // Capture the prompt text in closure to avoid race conditions
+      const copiedText = promptText;
+      setTimeout(() => {
+        // Only clear if this prompt is still the one showing as copied
+        setCopiedPromptText((current) => current === copiedText ? null : current);
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy prompt:', err);
     }
@@ -113,12 +125,27 @@ export function AnalysisProgressSection({
   ];
   
   // If we have generated prompts, use them; otherwise fall back to hardcoded defaults
-  const defaultPrompts = generatedPrompts.length > 0
-    ? generatedPrompts.filter(p => !removedDefaultPrompts.includes(p.id)).map(p => p.prompt)
-    : hardcodedPrompts.filter(p => !removedDefaultPrompts.includes(p.id)).map(p => p.prompt);
+  // Keep full objects with id and prompt to enable proper ID-based lookups
+  const defaultPromptObjects = generatedPrompts.length > 0
+    ? generatedPrompts.filter(p => !removedDefaultPrompts.includes(p.id))
+    : hardcodedPrompts.filter(p => !removedDefaultPrompts.includes(p.id));
+  
+  // Convert custom prompts to objects with generated IDs
+  const customPromptObjects = customPrompts.map((prompt, idx) => ({
+    id: `custom-${idx}`,
+    prompt,
+    isCustom: true
+  }));
   
   // Use provided prompts (during analysis) or generate from generated/defaults + custom (before analysis)
-  const displayPrompts = prompts.length > 0 ? prompts : [...defaultPrompts, ...customPrompts];
+  // When prompts are provided (during analysis), convert them to objects for consistency
+  const displayPrompts: DisplayPromptItem[] = prompts.length > 0
+    ? prompts.map((prompt, idx) => {
+        // Try to match with existing prompt objects to preserve IDs
+        const existingPrompt = [...defaultPromptObjects, ...customPromptObjects].find(p => p.prompt === prompt);
+        return existingPrompt || { id: `analysis-${idx}`, prompt, isCustom: customPrompts.includes(prompt) };
+      })
+    : [...defaultPromptObjects, ...customPromptObjects];
   
   return (
     <div className="flex items-center justify-center animate-panel-in">
@@ -191,25 +218,25 @@ export function AnalysisProgressSection({
               {/* Prompts tiles */}
               <div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {displayPrompts.map((prompt, index) => {
-                    const isCustom = customPrompts.includes(prompt);
+                  {displayPrompts.map((promptItem, index) => {
+                    const isCustom = promptItem.isCustom || customPrompts.includes(promptItem.prompt);
                     return (
-                      <div key={`${prompt}-${index}`} className="group relative bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
+                      <div key={promptItem.id} className="group relative bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-base font-medium text-gray-900 flex-1">
-                            {prompt}
+                            {promptItem.prompt}
                           </p>
                           <div className="flex items-center gap-1">
                             {/* Copy button - always visible on hover */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleCopyPrompt(prompt, index);
+                                handleCopyPrompt(promptItem.prompt);
                               }}
                               className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-gray-100"
                               title="Copy prompt"
                             >
-                              {copiedPromptIndex === index ? (
+                              {copiedPromptText === promptItem.prompt ? (
                                 <Check className="w-4 h-4 text-green-600" />
                               ) : (
                                 <Copy className="w-4 h-4 text-gray-600" />
@@ -221,11 +248,12 @@ export function AnalysisProgressSection({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  // Find the prompt ID from either generated or hardcoded prompts
-                                  const promptSource = generatedPrompts.length > 0 ? generatedPrompts : hardcodedPrompts;
-                                  const promptObj = promptSource.find(p => p.prompt === prompt);
-                                  if (promptObj) {
-                                    onRemoveDefaultPrompt(promptObj.id);
+                                  // Use ID directly for removal - no text-based lookup needed
+                                  if (!promptItem.id.startsWith('analysis-')) {
+                                    onRemoveDefaultPrompt(promptItem.id);
+                                  } else {
+                                    // Log warning if we can't find a proper ID
+                                    console.warn('Cannot remove prompt with temporary analysis ID:', promptItem.id, promptItem.prompt);
                                   }
                                 }}
                                 className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
@@ -237,7 +265,7 @@ export function AnalysisProgressSection({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onRemoveCustomPrompt(prompt);
+                                  onRemoveCustomPrompt(promptItem.prompt);
                                 }}
                                 className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
                               >
@@ -251,11 +279,11 @@ export function AnalysisProgressSection({
                         <div className="mt-4 flex items-center gap-3 justify-end">
                           {getEnabledProviders().map(config => {
                             const provider = config.name;
-                            const normalizedPrompt = prompt.trim();
+                            const normalizedPrompt = promptItem.prompt.trim();
                             const status = analyzing ? (promptCompletionStatus[normalizedPrompt]?.[provider] || 'pending') : null;
                             
                             return (
-                              <div key={`${prompt}-${provider}`} className="flex items-center gap-1">
+                              <div key={`${promptItem.id}-${provider}`} className="flex items-center gap-1">
                                 {getProviderIcon(provider)}
                                 {analyzing && (
                                   <>

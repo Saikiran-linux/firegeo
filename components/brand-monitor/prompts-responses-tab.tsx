@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronsDown, ChevronsUp, Copy, Check } from 'lucide-react';
@@ -69,6 +69,16 @@ export function PromptsResponsesTab({
   const [allExpanded, setAllExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
   
   const handleExpandAll = () => {
     if (allExpanded) {
@@ -85,8 +95,19 @@ export function PromptsResponsesTab({
   const handleCopyPrompt = async (promptText: string, index: number) => {
     try {
       await navigator.clipboard.writeText(promptText);
+      
+      // Clear any existing timeout before setting a new one
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      
       setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 2000);
+      
+      // Store the timeout ID in the ref
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopiedIndex(null);
+        copyTimeoutRef.current = null;
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy prompt:', err);
     }
@@ -227,6 +248,7 @@ export function PromptsResponsesTab({
                   }}
                   className="p-1.5 rounded-md hover:bg-gray-100 transition-colors shrink-0 text-gray-500 hover:text-gray-700"
                   title="Copy prompt"
+                  aria-label={`Copy prompt ${idx + 1}`}
                 >
                   {copiedIndex === idx ? (
                     <Check className="h-4 w-4 text-green-600" />

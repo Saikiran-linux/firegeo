@@ -1,9 +1,15 @@
 import { generateText, generateObject, LanguageModel } from 'ai';
 import { z } from 'zod';
+import pino from 'pino';
 import { Company, CompanyInput, BrandPrompt, AIResponse, CompanyRanking, CompetitorRanking, ProviderSpecificRanking, ProviderComparisonData, ProgressCallback, CompetitorFoundData } from './types';
 import { getProviderModel, normalizeProviderName, isProviderConfigured, getConfiguredProviders, getProviderConfig, PROVIDER_CONFIGS } from './provider-config';
 import { detectBrandMention, detectMultipleBrands, BrandDetectionOptions } from './brand-detection-utils';
 import { getBrandDetectionOptions } from './brand-detection-config';
+import { MAX_COMPETITORS } from './perplexity';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+});
 
 const RankingSchema = z.object({
   rankings: z.array(z.object({
@@ -141,14 +147,22 @@ function buildCategoryFallbackPrompt(category: BrandPrompt['category'], company:
 }
 
 export async function identifyCompetitors(company: CompanyInput, progressCallback?: ProgressCallback): Promise<string[]> {
-  console.log('\n🔍 [identifyCompetitors] Fallback competitor identification (used when web search fails)');
-  console.log(`🏢 Company: ${company.name}`);
+  logger.info({
+    context: 'identifyCompetitors',
+    company: company.name,
+    industry: company.industry,
+  }, '🔍 Fallback competitor identification (used when web search fails)');
   
   try {
     // PRIORITY 1: Try to use Perplexity for research (has built-in web search)
     const perplexityProvider = getProviderConfig('perplexity');
     if (perplexityProvider?.isConfigured()) {
-      console.log('📊 [identifyCompetitors] Using Perplexity (Sonar Pro) for competitor research');
+      logger.info({
+        context: 'identifyCompetitors',
+        company: company.name,
+        provider: 'Perplexity',
+        model: 'sonar-pro',
+      }, '📊 Using Perplexity (Sonar Pro) for competitor research');
       
       const perplexityModel = getProviderModel('perplexity', 'sonar-pro');
       if (perplexityModel) {
@@ -232,7 +246,7 @@ Do not include explanations, just the numbered list of competitor names.`;
               }
             }
 
-            return competitors.slice(0, 9); // Limit to 9 max
+            return competitors.slice(0, MAX_COMPETITORS);
           } else {
             console.warn('Perplexity returned insufficient results, falling back to other providers');
           }
@@ -256,7 +270,7 @@ Do not include explanations, just the numbered list of competitor names.`;
       throw new Error(`${provider.name} model not available`);
     }
     
-    const prompt = `Identify 6-9 real, established competitors of ${company.name} in the ${company.industry || 'technology'} industry.
+    const prompt = `Identify 6-12 real, established competitors of ${company.name} in the ${company.industry || 'technology'} industry.
 
 Company: ${company.name}
 Website: ${company.url || 'Not provided'}
@@ -281,7 +295,7 @@ IMPORTANT:
 - Only include companies you are confident actually exist
 - Focus on TRUE competitors with similar offerings
 - Exclude retailers, marketplaces, or aggregators unless the company itself is one
-- Aim for 6-9 competitors total
+- Aim for 6-12 competitors total
 - Do NOT include general retailers or platforms that just sell/distribute products`;
 
     const { object } = await generateObject({
@@ -401,30 +415,30 @@ async function detectIndustryFromContent(company: Company): Promise<string> {
 }
 
 export async function generatePromptsForCompany(company: Company, competitors: string[]): Promise<BrandPrompt[]> {
-  console.log('\n' + '═'.repeat(80));
-  console.log('🎨 PROMPT GENERATION PROCESS');
-  console.log('═'.repeat(80));
-  console.log(`🏢 Company: ${company.name}`);
-  console.log(`👥 Competitors: ${competitors.length}`);
+  const isDebug = process.env.DEBUG_PROMPT_GEN === 'true';
+  
+  logger.info({ company: company.name, competitorCount: competitors.length }, 'Starting prompt generation');
+  
+  if (isDebug) {
+    logger.debug({ company: company.name, competitors }, 'Prompt generation context');
+  }
   
   const promptContext = buildPromptGenerationPrompt(company, competitors);
 
   const anthropicModel = getProviderModel('anthropic', 'claude-4-sonnet-20250514');
 
-  console.log('\n📊 Model Configuration:');
-  console.log(`   🧠 Provider: Anthropic`);
-  console.log(`   🤖 Model: Claude 4 Sonnet`);
-  console.log(`   ✅ Status: ${anthropicModel ? 'Configured' : 'Not Available'}`);
+  if (isDebug) {
+    logger.debug({ provider: 'Anthropic', model: 'Claude 4 Sonnet', configured: !!anthropicModel }, 'Model configuration');
+  }
 
   if (!anthropicModel) {
-    console.warn('\n⚠️  Claude 4 Sonnet not configured. Falling back to heuristic prompts.');
+    logger.warn('Claude 4 Sonnet not configured, falling back to heuristic prompts');
     const heuristicPrompts = getHeuristicPrompts(company, competitors);
-    console.log(`✅ Generated ${heuristicPrompts.length} heuristic prompts`);
-    console.log('═'.repeat(80) + '\n');
+    logger.info({ promptCount: heuristicPrompts.length }, 'Generated heuristic prompts');
     return heuristicPrompts;
   }
 
-  console.log(`\n🚀 Starting prompt generation with Claude 4 Sonnet...`);
+  logger.info('Starting prompt generation with Claude 4 Sonnet');
 
   try {
     const startTime = Date.now();
@@ -438,7 +452,6 @@ export async function generatePromptsForCompany(company: Company, competitors: s
     });
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`⏱️  Completed in ${duration}s`);
 
     const prompts = object.prompts.map((entry, index) => ({
       id: `Claude-${index + 1}`,
@@ -446,16 +459,14 @@ export async function generatePromptsForCompany(company: Company, competitors: s
       category: entry.category,
     }));
 
-    console.log(`✅ Generated ${prompts.length} prompts`);
-    console.log('═'.repeat(80) + '\n');
+    logger.info({ promptCount: prompts.length, duration: `${duration}s` }, 'Prompt generation completed');
 
     return prompts;
   } catch (error) {
-    console.error(`❌ Claude 4 Sonnet prompt generation failed:`, error instanceof Error ? error.message : error);
-    console.warn('\n⚠️  Falling back to heuristic prompts due to error.');
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Claude 4 Sonnet prompt generation failed');
+    logger.warn('Falling back to heuristic prompts due to error');
     const heuristicPrompts = getHeuristicPrompts(company, competitors);
-    console.log(`✅ Generated ${heuristicPrompts.length} heuristic prompts`);
-    console.log('═'.repeat(80) + '\n');
+    logger.info({ promptCount: heuristicPrompts.length }, 'Generated heuristic prompts');
     return heuristicPrompts;
   }
 }
@@ -673,7 +684,7 @@ Examples of mentions to catch:
     try {
       // Use a fast model for structured output if available
       const structuredModel = (normalizedProvider === 'anthropic' || normalizedProvider === 'google')
-        ? getProviderModel('openai', 'gpt-5-mini') || model
+        ? getProviderModel('openai', 'gpt-5-mini-2025-08-07') || model
         : model;
       
       const result = await generateObject({
@@ -716,7 +727,7 @@ Look for mentions of "${brandName}" and competitors: ${competitors.join(', ')}
 Return ONLY the JSON object, no other text.`;
 
         const structuredModel = (normalizedProvider === 'anthropic' || normalizedProvider === 'google')
-          ? getProviderModel('openai', 'gpt-5-mini') || model
+          ? getProviderModel('openai', 'gpt-5-mini-2025-08-07') || model
           : model;
         
         const result = await generateObject({
@@ -1080,10 +1091,11 @@ function determineSentiment(sentiments: ('positive' | 'neutral' | 'negative' | '
   const counts = { positive: 0, neutral: 0, negative: 0, mixed: 0 };
   sentiments.forEach(s => counts[s]++);
   
-  if (counts.positive > counts.negative && counts.positive > counts.neutral && counts.positive > counts.mixed) return 'positive';
-  if (counts.negative > counts.positive && counts.negative > counts.neutral && counts.negative > counts.mixed) return 'negative';
-  if (counts.mixed > counts.positive && counts.mixed > counts.neutral && counts.mixed > counts.negative) return 'mixed';
-  return 'neutral';
+  const maxEntry = Object.entries(counts).reduce((max, entry) => 
+    entry[1] > max[1] ? entry : max
+  );
+  
+  return maxEntry[0] as 'positive' | 'neutral' | 'negative' | 'mixed';
 }
 
 export function calculateBrandScores(responses: AIResponse[], brandName: string, competitors: CompetitorRanking[]) {

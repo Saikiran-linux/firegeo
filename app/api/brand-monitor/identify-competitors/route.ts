@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import pino from 'pino';
 import { auth } from '@/lib/auth';
 import { handleApiError, AuthenticationError, ValidationError } from '@/lib/api-errors';
 import { CompanyInput } from '@/lib/types';
 import { fetchCompetitorsWithWebSearch, CompetitorWithType } from '@/lib/perplexity';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,28 +34,38 @@ export async function POST(request: NextRequest) {
 
     let competitors: CompetitorWithType[] = [];
 
-    console.log('\n' + '═'.repeat(100));
-    console.log('🎯 API ENDPOINT: /api/brand-monitor/identify-competitors');
-    console.log('═'.repeat(100));
-    console.log(`📥 Request received for company: ${sanitizedCompany.name}`);
-    console.log(`🔗 Website: ${sanitizedCompany.url || 'Not provided'}`);
-    console.log(`🏭 Industry: ${sanitizedCompany.industry || 'Not specified'}`);
-    
+    const isProduction = process.env.NODE_ENV === 'production';
+    const logCompanyName = isProduction ? '[REDACTED]' : sanitizedCompany.name;
+    const logWebsite = isProduction ? '[REDACTED]' : (sanitizedCompany.url || 'Not provided');
+    const logIndustry = sanitizedCompany.industry || 'Not specified';
+
+    logger.info({
+      company: logCompanyName,
+      website: logWebsite,
+      industry: logIndustry,
+      hasScrapedCompetitors: !!sanitizedCompany.scrapedData?.competitors?.length,
+    }, 'API /api/brand-monitor/identify-competitors request received');
+
     if (sanitizedCompany.scrapedData?.competitors?.length) {
-      console.log(`📋 Scraped competitors found: ${sanitizedCompany.scrapedData.competitors.length}`);
+      logger.debug({
+        count: sanitizedCompany.scrapedData.competitors.length,
+        sample: isProduction ? undefined : sanitizedCompany.scrapedData.competitors.slice(0, 5),
+      }, 'Scraped competitors detected');
     }
 
     try {
-      console.log('\n🚀 Initiating competitor research with Perplexity Sonar Pro...\n');
+      logger.info('Initiating competitor research with Perplexity Sonar Pro');
       const startTime = Date.now();
       
       competitors = await fetchCompetitorsWithWebSearch(sanitizedCompany);
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`\n⏱️  Total API processing time: ${duration}s`);
-      console.log(`✅ Perplexity returned ${competitors.length} competitors`);
+      logger.info({
+        durationSeconds: Number(duration),
+        competitorCount: competitors.length,
+      }, 'Perplexity competitor research completed');
     } catch (webSearchError) {
-      console.error('\n❌ Failed to fetch competitors from Perplexity:', webSearchError);
+      logger.error({ err: webSearchError }, 'Failed to fetch competitors from Perplexity');
       competitors = [];
     }
 
@@ -61,20 +76,19 @@ export async function POST(request: NextRequest) {
         .filter(name => !competitors.find(c => c.name.toLowerCase() === name.toLowerCase()))
         .map(name => ({ name, type: 'direct' as const }));
       
-      if (scrapedCompetitors.length > 0) {
-        console.log(`\n📌 Adding ${scrapedCompetitors.length} additional competitors from website scraping`);
-      }
-      
       competitors = [...competitors, ...scrapedCompetitors].slice(0, 15);
       
       if (scrapedCompetitors.length > 0) {
-        console.log(`📊 Total after merging: ${competitors.length} competitors`);
+        logger.info({
+          added: scrapedCompetitors.length,
+          total: competitors.length,
+        }, 'Merged scraped competitors');
       }
     }
 
-    console.log('\n' + '═'.repeat(100));
-    console.log(`✅ FINAL RESPONSE: Returning ${competitors.length} competitors`);
-    console.log('═'.repeat(100) + '\n');
+    logger.info({
+      competitorCount: competitors.length,
+    }, 'Returning competitors response');
 
     return NextResponse.json({ competitors });
   } catch (error) {

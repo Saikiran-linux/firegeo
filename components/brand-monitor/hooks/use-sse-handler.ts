@@ -97,10 +97,13 @@ export function useSSEHandler({ state, dispatch, onCreditsUpdate, onAnalysisComp
               prompts: [...analysisPrompts, promptData.prompt]
             }
           });
+          const newAnalyzingPrompts = [...existingPrompts, promptData.prompt];
           dispatch({
             type: 'SET_ANALYZING_PROMPTS',
-            payload: [...existingPrompts, promptData.prompt]
+            payload: newAnalyzingPrompts
           });
+          // Update ref immediately to keep it in sync for subsequent events
+          analyzingPromptsRef.current = newAnalyzingPrompts;
 
           const newGeneratedPrompts = [
             ...generatedPromptsRef.current,

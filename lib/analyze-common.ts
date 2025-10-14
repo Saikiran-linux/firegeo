@@ -3,6 +3,8 @@ import { generatePromptsForCompany, analyzePromptWithProvider, calculateBrandSco
 import { analyzePromptWithProvider as analyzePromptWithProviderEnhanced } from './ai-utils-enhanced';
 import { getConfiguredProviders } from './provider-config';
 
+const verboseLogging = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
+
 export interface AnalysisConfig {
   company: Company;
   customPrompts?: string[];
@@ -148,11 +150,14 @@ export async function performAnalysis({
   availableProviders.forEach((p, idx) => {
     console.log(`   ${idx + 1}. ${p.name} - Model: ${p.model}`);
   });
-  console.log('\n🔑 API Keys Status:');
-  console.log(`   ${process.env.OPENAI_API_KEY ? '✅' : '❌'} OpenAI`);
-  console.log(`   ${process.env.ANTHROPIC_API_KEY ? '✅' : '❌'} Anthropic`);
-  console.log(`   ${process.env.GOOGLE_GENERATIVE_AI_API_KEY ? '✅' : '❌'} Google`);
-  console.log(`   ${process.env.PERPLEXITY_API_KEY ? '✅' : '❌'} Perplexity`);
+  const shouldLogApiKeys = process.env.NODE_ENV !== 'production' || process.env.DEBUG?.toLowerCase() === 'true';
+  if (shouldLogApiKeys) {
+    console.log('\n🔑 API Keys Status:');
+    console.log(`   ${process.env.OPENAI_API_KEY ? '✅' : '❌'} OpenAI`);
+    console.log(`   ${process.env.ANTHROPIC_API_KEY ? '✅' : '❌'} Anthropic`);
+    console.log(`   ${process.env.GOOGLE_GENERATIVE_AI_API_KEY ? '✅' : '❌'} Google`);
+    console.log(`   ${process.env.PERPLEXITY_API_KEY ? '✅' : '❌'} Perplexity`);
+  }
   console.log(`\n🌐 Web Search: ${useWebSearch ? '✅ ENABLED' : '❌ DISABLED'}`);
   if (useWebSearch) {
     console.log(`   🔍 OpenAI (gpt-5-chat-latest): Web search enabled via enhanced prompts`);
@@ -206,11 +211,12 @@ export async function performAnalysis({
         });
 
         try {
-          // Log each provider attempt with detailed info
-          console.log(`\n🎯 [${provider.name}] Starting analysis...`);
-          console.log(`   📝 Prompt: "${prompt.prompt.substring(0, 70)}..."`);
-          console.log(`   🤖 Model: ${provider.model}`);
-          console.log(`   🌐 Web Search: ${useWebSearch ? 'Enabled' : 'Disabled'}`);
+          if (verboseLogging) {
+            console.log(`\n🎯 [${provider.name}] Starting analysis...`);
+            console.log(`   📝 Prompt: "${prompt.prompt.substring(0, 70)}..."`);
+            console.log(`   🤖 Model: ${provider.model}`);
+            console.log(`   🌐 Web Search: ${useWebSearch ? 'Enabled' : 'Disabled'}`);
+          }
           
           const analysisStartTime = Date.now();
           
@@ -229,13 +235,15 @@ export async function performAnalysis({
           
           const analysisDuration = ((Date.now() - analysisStartTime) / 1000).toFixed(2);
           
-          if (response) {
-            console.log(`   ✅ Completed in ${analysisDuration}s`);
-            console.log(`   🎯 Brand mentioned: ${response.brandMentioned ? 'YES' : 'NO'}${response.brandPosition ? ` (Position: #${response.brandPosition})` : ''}`);
-            console.log(`   💭 Sentiment: ${response.sentiment}`);
-            console.log(`   👥 Competitors in response: ${response.competitors.length}`);
-          } else {
-            console.log(`   ⏭️  Skipped in ${analysisDuration}s`);
+          if (verboseLogging) {
+            if (response) {
+              console.log(`   ✅ Completed in ${analysisDuration}s`);
+              console.log(`   🎯 Brand mentioned: ${response.brandMentioned ? 'YES' : 'NO'}${response.brandPosition ? ` (Position: #${response.brandPosition})` : ''}`);
+              console.log(`   💭 Sentiment: ${response.sentiment}`);
+              console.log(`   👥 Competitors in response: ${response.competitors.length}`);
+            } else {
+              console.log(`   ⏭️  Skipped in ${analysisDuration}s`);
+            }
           }
           
           // Skip if provider returned null (not configured)
@@ -340,19 +348,25 @@ export async function performAnalysis({
     // Wait for all promises in this batch to complete
     await Promise.all(batchPromises);
     
-    console.log(`\n✅ Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} complete (${completedAnalyses}/${totalAnalyses} total analyses done)`);
+    if (verboseLogging) {
+      console.log(`\n✅ Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} complete (${completedAnalyses}/${totalAnalyses} total analyses done)`);
+    }
   }
 
-  console.log('\n' + '═'.repeat(80));
-  console.log(`🎉 ALL ANALYSES COMPLETE: ${completedAnalyses}/${totalAnalyses} successful`);
-  console.log(`📊 Responses collected: ${responses.length}`);
-  if (errors.length > 0) {
-    console.log(`⚠️  Errors encountered: ${errors.length}`);
+  if (verboseLogging) {
+    console.log('\n' + '═'.repeat(80));
+    console.log(`🎉 ALL ANALYSES COMPLETE: ${completedAnalyses}/${totalAnalyses} successful`);
+    console.log(`📊 Responses collected: ${responses.length}`);
+    if (errors.length > 0) {
+      console.log(`⚠️  Errors encountered: ${errors.length}`);
+    }
+    console.log('═'.repeat(80));
   }
-  console.log('═'.repeat(80));
 
   // Stage 4: Calculate scores
-  console.log('\n💯 Starting score calculation phase...');
+  if (verboseLogging) {
+    console.log('\n💯 Starting score calculation phase...');
+  }
   await sendEvent({
     type: 'stage',
     stage: 'calculating-scores',

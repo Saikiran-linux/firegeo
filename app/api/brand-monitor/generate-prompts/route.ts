@@ -31,23 +31,7 @@ const RequestBodySchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    
-    // Early validation: ensure company is a valid object with required properties
-    if (
-      typeof body.company !== 'object' || 
-      body.company === null || 
-      typeof body.company.name !== 'string' || 
-      body.company.name.trim().length === 0
-    ) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid company object',
-          details: 'Company must be an object with a non-empty name property'
-        },
-        { status: 400 }
-      );
-    }
-    
+
     // Validate request body with Zod
     const validationResult = RequestBodySchema.safeParse(body);
     
@@ -84,8 +68,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ prompts });
   } catch (error) {
     console.error('Error generating prompts:', error);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    const errorDetails = isDevelopment && error instanceof Error 
+      ? error.message 
+      : 'Internal server error';
+    
     return NextResponse.json(
-      { error: 'Failed to generate prompts', details: 'Internal server error' },
+      { error: 'Failed to generate prompts', details: errorDetails },
       { status: 500 }
     );
   }

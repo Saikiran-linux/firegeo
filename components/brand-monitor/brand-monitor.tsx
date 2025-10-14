@@ -301,7 +301,38 @@ export function BrandMonitor({
         }
 
         const data = await response.json();
-        competitorsWithType = (data.competitors || []) as Array<{ name: string; type: 'direct' | 'regional' | 'international' }>;
+        const rawCompetitors: unknown[] = Array.isArray(data?.competitors) ? data.competitors : [];
+
+        if (!Array.isArray(data?.competitors)) {
+          console.warn('[brand-monitor] Unexpected competitors payload shape', {
+            receivedType: typeof data?.competitors,
+            data,
+          });
+        }
+
+        const validatedCompetitors: Array<{ name: string; type: 'direct' | 'regional' | 'international' }> = [];
+
+        rawCompetitors.forEach((item, index) => {
+          if (!item || typeof item !== 'object') {
+            console.warn('[brand-monitor] Skipping competitor with invalid structure', { index, item });
+            return;
+          }
+
+          const candidate = item as { name?: unknown; type?: unknown };
+          const name = typeof candidate.name === 'string' ? candidate.name.trim() : undefined;
+          const type = candidate.type;
+          const isValidType = type === 'direct' || type === 'regional' || type === 'international';
+
+          if (!name || !isValidType) {
+            console.warn('[brand-monitor] Skipping competitor with invalid fields', { index, item });
+            return;
+          }
+
+          validatedCompetitors.push({ name, type });
+        });
+
+        competitorsWithType = validatedCompetitors;
+
         aiCompetitors = competitorsWithType.map(c => c.name);
       } catch (error) {
         console.error('Failed to fetch AI competitors:', error);
