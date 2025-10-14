@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Trash2, CheckIcon } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckIcon, Copy, Check } from 'lucide-react';
 import { Company, AnalysisStage } from '@/lib/types';
 import { IdentifiedCompetitor, PromptCompletionStatus } from '@/lib/brand-monitor-reducer';
 import { getEnabledProviders } from '@/lib/provider-config';
@@ -18,9 +18,9 @@ interface AnalysisProgressSectionProps {
   };
   prompts: string[];
   customPrompts: string[];
-  removedDefaultPrompts: number[];
+  removedDefaultPrompts: string[];
   promptCompletionStatus: PromptCompletionStatus;
-  onRemoveDefaultPrompt: (index: number) => void;
+  onRemoveDefaultPrompt: (id: string) => void;
   onRemoveCustomPrompt: (prompt: string) => void;
   onAddPromptClick: () => void;
   onStartAnalysis: () => void;
@@ -88,19 +88,34 @@ export function AnalysisProgressSection({
   detectServiceType,
   generatedPrompts = []
 }: AnalysisProgressSectionProps) {
+  const [copiedPromptIndex, setCopiedPromptIndex] = useState<number | null>(null);
+  
   // Generate default prompts only if no generated prompts are available
   const serviceType = detectServiceType(company);
   const currentYear = new Date().getFullYear();
   
+  const handleCopyPrompt = async (promptText: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopiedPromptIndex(index);
+      setTimeout(() => setCopiedPromptIndex(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy prompt:', err);
+    }
+  };
+  
+  // Create hardcoded prompts with stable IDs
+  const hardcodedPrompts = [
+    { id: `default-0`, prompt: `What are the best ${serviceType}s in ${currentYear}?` },
+    { id: `default-1`, prompt: `I need a ${serviceType} for my startup, what do you recommend?` },
+    { id: `default-2`, prompt: `Top ${serviceType}s for small businesses?` },
+    { id: `default-3`, prompt: `Which ${serviceType} should I choose for my team?` }
+  ];
+  
   // If we have generated prompts, use them; otherwise fall back to hardcoded defaults
   const defaultPrompts = generatedPrompts.length > 0
-    ? generatedPrompts.map(p => p.prompt).filter((_, index) => !removedDefaultPrompts.includes(index))
-    : [
-        `What are the best ${serviceType}s in ${currentYear}?`,
-        `I need a ${serviceType} for my startup, what do you recommend?`,
-        `Top ${serviceType}s for small businesses?`,
-        `Which ${serviceType} should I choose for my team?`
-      ].filter((_, index) => !removedDefaultPrompts.includes(index));
+    ? generatedPrompts.filter(p => !removedDefaultPrompts.includes(p.id)).map(p => p.prompt)
+    : hardcodedPrompts.filter(p => !removedDefaultPrompts.includes(p.id)).map(p => p.prompt);
   
   // Use provided prompts (during analysis) or generate from generated/defaults + custom (before analysis)
   const displayPrompts = prompts.length > 0 ? prompts : [...defaultPrompts, ...customPrompts];
@@ -180,35 +195,56 @@ export function AnalysisProgressSection({
                     const isCustom = customPrompts.includes(prompt);
                     return (
                       <div key={`${prompt}-${index}`} className="group relative bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
-                        <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start justify-between gap-2">
                           <p className="text-base font-medium text-gray-900 flex-1">
                             {prompt}
                           </p>
-                          {!analyzing && !isCustom && (
+                          <div className="flex items-center gap-1">
+                            {/* Copy button - always visible on hover */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const originalIndex = defaultPrompts.findIndex(p => p === prompt);
-                                if (originalIndex !== -1) {
-                                  onRemoveDefaultPrompt(originalIndex);
-                                }
+                                handleCopyPrompt(prompt, index);
                               }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-gray-100"
+                              title="Copy prompt"
                             >
-                              <Trash2 className="w-4 h-4 text-red-600" />
+                              {copiedPromptIndex === index ? (
+                                <Check className="w-4 h-4 text-green-600" />
+                              ) : (
+                                <Copy className="w-4 h-4 text-gray-600" />
+                              )}
                             </button>
-                          )}
-                          {!analyzing && isCustom && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRemoveCustomPrompt(prompt);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
-                            >
-                              <Trash2 className="w-4 h-4 text-red-600" />
-                            </button>
-                          )}
+                            
+                            {/* Delete button */}
+                            {!analyzing && !isCustom && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Find the prompt ID from either generated or hardcoded prompts
+                                  const promptSource = generatedPrompts.length > 0 ? generatedPrompts : hardcodedPrompts;
+                                  const promptObj = promptSource.find(p => p.prompt === prompt);
+                                  if (promptObj) {
+                                    onRemoveDefaultPrompt(promptObj.id);
+                                  }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                              </button>
+                            )}
+                            {!analyzing && isCustom && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRemoveCustomPrompt(prompt);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         
                         {/* Provider icons and status */}

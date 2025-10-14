@@ -73,6 +73,38 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     enabled: PROVIDER_ENABLED_CONFIG.openai,
     models: [
       {
+        id: 'gpt-5-chat-latest',
+        name: 'GPT-5 Chat Latest',
+        maxTokens: 200000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
+        id: 'gpt-5',
+        name: 'GPT-5',
+        maxTokens: 200000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
+        id: 'gpt-5-turbo',
+        name: 'GPT-5 Turbo',
+        maxTokens: 200000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
+        id: 'gpt-5-mini',
+        name: 'GPT-5 Mini',
+        maxTokens: 128000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
         id: 'gpt-4o',
         name: 'GPT-4 Optimized',
         maxTokens: 128000,
@@ -97,7 +129,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         supportsWebSearch: false,
       },
     ],
-    defaultModel: 'gpt-4o',
+    defaultModel: 'gpt-5-chat-latest',
     capabilities: {
       webSearch: true, // Via responses API with specific models
       functionCalling: true,
@@ -128,7 +160,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         maxTokens: 200000,
         supportsFunctionCalling: true,
         supportsStructuredOutput: true,
-        supportsWebSearch: false,
+        supportsWebSearch: true,
       },
       {
         id: 'claude-3-5-sonnet-20241022',
@@ -149,7 +181,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     ],
     defaultModel: 'claude-4-sonnet-20250514',
     capabilities: {
-      webSearch: false,
+      webSearch: true,
       functionCalling: true,
       structuredOutput: true,
       streamingResponse: true,
@@ -169,6 +201,14 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     envKey: 'GOOGLE_GENERATIVE_AI_API_KEY',
     enabled: PROVIDER_ENABLED_CONFIG.google,
     models: [
+      {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash',
+        maxTokens: 1000000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
       {
         id: 'gemini-2.5-pro',
         name: 'Gemini 2.5 Pro',
@@ -194,7 +234,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         supportsWebSearch: true,
       },
     ],
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: 'gemini-2.5-flash',
     capabilities: {
       webSearch: true, // Native search grounding
       functionCalling: true,

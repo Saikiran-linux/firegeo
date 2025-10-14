@@ -21,6 +21,7 @@ export function useSSEHandler({ state, dispatch, onCreditsUpdate, onAnalysisComp
   // Use ref to track current prompt status to avoid closure issues in SSE handler
   const promptCompletionStatusRef = useRef(state.promptCompletionStatus);
   const analyzingPromptsRef = useRef(state.analyzingPrompts);
+  const generatedPromptsRef = useRef(state.generatedPrompts);
   
   useEffect(() => {
     promptCompletionStatusRef.current = state.promptCompletionStatus;
@@ -29,6 +30,10 @@ export function useSSEHandler({ state, dispatch, onCreditsUpdate, onAnalysisComp
   useEffect(() => {
     analyzingPromptsRef.current = state.analyzingPrompts;
   }, [state.analyzingPrompts]);
+  
+  useEffect(() => {
+    generatedPromptsRef.current = state.generatedPrompts;
+  }, [state.generatedPrompts]);
 
   const handleSSEEvent = (eventData: any) => {
     console.log('[SSE] Received event:', eventData.type, eventData.data);
@@ -97,17 +102,22 @@ export function useSSEHandler({ state, dispatch, onCreditsUpdate, onAnalysisComp
             payload: [...existingPrompts, promptData.prompt]
           });
 
+          const newGeneratedPrompts = [
+            ...generatedPromptsRef.current,
+            {
+              id: `generated-${promptData.index}`,
+              prompt: promptData.prompt,
+              category: promptData.category || 'recommendations',
+            } as BrandPrompt,
+          ];
+          
           dispatch({
             type: 'SET_GENERATED_PROMPTS',
-            payload: [
-              ...state.generatedPrompts,
-              {
-                id: `generated-${promptData.index}`,
-                prompt: promptData.prompt,
-                category: promptData.category || 'recommendations',
-              } as BrandPrompt,
-            ],
+            payload: newGeneratedPrompts,
           });
+          
+          // Update ref immediately to keep it in sync
+          generatedPromptsRef.current = newGeneratedPrompts;
           
           // Initialize prompt completion status
           const newStatus = { ...promptCompletionStatusRef.current };

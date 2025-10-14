@@ -10,13 +10,13 @@ const RankingSchema = z.object({
     position: z.number().nullable().optional(),
     company: z.string(),
     reason: z.string().optional(),
-    sentiment: z.enum(['positive', 'neutral', 'negative']).optional(),
+    sentiment: z.enum(['positive', 'neutral', 'negative', 'mixed']).optional(),
   })),
   analysis: z.object({
     brandMentioned: z.boolean(),
     brandPosition: z.number().nullable().optional(),
     competitors: z.array(z.string()),
-    overallSentiment: z.enum(['positive', 'neutral', 'negative']),
+    overallSentiment: z.enum(['positive', 'neutral', 'negative', 'mixed']),
     confidence: z.number().min(0).max(1),
   }),
 });
@@ -141,11 +141,14 @@ function buildCategoryFallbackPrompt(category: BrandPrompt['category'], company:
 }
 
 export async function identifyCompetitors(company: CompanyInput, progressCallback?: ProgressCallback): Promise<string[]> {
+  console.log('\n🔍 [identifyCompetitors] Fallback competitor identification (used when web search fails)');
+  console.log(`🏢 Company: ${company.name}`);
+  
   try {
     // PRIORITY 1: Try to use Perplexity for research (has built-in web search)
     const perplexityProvider = getProviderConfig('perplexity');
     if (perplexityProvider?.isConfigured()) {
-      console.log('Using Perplexity for competitor research with web search');
+      console.log('📊 [identifyCompetitors] Using Perplexity (Sonar Pro) for competitor research');
       
       const perplexityModel = getProviderModel('perplexity', 'sonar-pro');
       if (perplexityModel) {
@@ -154,16 +157,18 @@ export async function identifyCompetitors(company: CompanyInput, progressCallbac
 
 Company Information:
 - Name: ${company.name}
+- Website: ${company.url || 'Not provided'}
 - Industry: ${company.industry}
 - Description: ${company.description}
 ${company.scrapedData?.keywords ? `- Keywords: ${company.scrapedData.keywords.join(', ')}` : ''}
 ${company.scrapedData?.competitors ? `- Known competitors: ${company.scrapedData.competitors.join(', ')}` : ''}
 
 Research Requirements:
-1. Find DIRECT competitors that offer the SAME products/services (not retailers that sell them)
-2. Match the SAME customer segment and business model
-3. Actually compete for the same customers in the same market
-4. Use current web data to verify they exist and are active
+1. Visit the company website to understand their business model, products/services, and target market
+2. Find DIRECT competitors that offer the SAME products/services (not retailers that sell them)
+3. Match the SAME customer segment and business model
+4. Actually compete for the same customers in the same market
+5. Use current web data to verify they exist and are active
 
 Important Guidelines:
 - If it's a DTC brand, find OTHER DTC brands in the same category (not department stores)
@@ -254,12 +259,13 @@ Do not include explanations, just the numbered list of competitor names.`;
     const prompt = `Identify 6-9 real, established competitors of ${company.name} in the ${company.industry || 'technology'} industry.
 
 Company: ${company.name}
+Website: ${company.url || 'Not provided'}
 Industry: ${company.industry}
 Description: ${company.description}
 ${company.scrapedData?.keywords ? `Keywords: ${company.scrapedData.keywords.join(', ')}` : ''}
 ${company.scrapedData?.competitors ? `Known competitors: ${company.scrapedData.competitors.join(', ')}` : ''}
 
-Based on this company's specific business model and target market, identify ONLY direct competitors that:
+Based on this company's specific business model and target market (visit their website to understand better), identify ONLY direct competitors that:
 1. Offer the SAME type of products/services (not just retailers that sell them)
 2. Target the SAME customer segment
 3. Have a SIMILAR business model (e.g., if it's a DTC brand, find other DTC brands)
@@ -271,6 +277,7 @@ For example:
 - If it's an AI model provider, find OTHER AI model providers (not AI applications)
 
 IMPORTANT: 
+- Visit the company website to better understand their offerings and business model
 - Only include companies you are confident actually exist
 - Focus on TRUE competitors with similar offerings
 - Exclude retailers, marketplaces, or aggregators unless the company itself is one
@@ -394,57 +401,63 @@ async function detectIndustryFromContent(company: Company): Promise<string> {
 }
 
 export async function generatePromptsForCompany(company: Company, competitors: string[]): Promise<BrandPrompt[]> {
+  console.log('\n' + '═'.repeat(80));
+  console.log('🎨 PROMPT GENERATION PROCESS');
+  console.log('═'.repeat(80));
+  console.log(`🏢 Company: ${company.name}`);
+  console.log(`👥 Competitors: ${competitors.length}`);
+  
   const promptContext = buildPromptGenerationPrompt(company, competitors);
 
-  const openAIModel = getProviderModel('openai', 'gpt-5') || getProviderModel('openai', 'gpt-4o');
-  const perplexityModel = getProviderModel('perplexity', 'sonar-pro');
+  const anthropicModel = getProviderModel('anthropic', 'claude-4-sonnet-20250514');
 
-  if (!openAIModel && !perplexityModel) {
-    console.warn('[generatePromptsForCompany] No high-tier providers configured (OpenAI GPT-5 or Perplexity Sonar Pro). Falling back to heuristics.');
-    return getHeuristicPrompts(company, competitors);
+  console.log('\n📊 Model Configuration:');
+  console.log(`   🧠 Provider: Anthropic`);
+  console.log(`   🤖 Model: Claude 4 Sonnet`);
+  console.log(`   ✅ Status: ${anthropicModel ? 'Configured' : 'Not Available'}`);
+
+  if (!anthropicModel) {
+    console.warn('\n⚠️  Claude 4 Sonnet not configured. Falling back to heuristic prompts.');
+    const heuristicPrompts = getHeuristicPrompts(company, competitors);
+    console.log(`✅ Generated ${heuristicPrompts.length} heuristic prompts`);
+    console.log('═'.repeat(80) + '\n');
+    return heuristicPrompts;
   }
 
-  const promptSets: BrandPrompt[][] = [];
+  console.log(`\n🚀 Starting prompt generation with Claude 4 Sonnet...`);
 
-  const runPromptGeneration = async (model: LanguageModel | null, label: string): Promise<void> => {
-    if (!model) {
-      return;
-    }
+  try {
+    const startTime = Date.now();
+    
+    const { object } = await generateObject({
+      model: anthropicModel,
+      schema: PromptGenerationSchema,
+      temperature: 0.5,
+      prompt: promptContext,
+      maxRetries: 3,
+    });
 
-    try {
-      const { object } = await generateObject({
-        model,
-        schema: PromptGenerationSchema,
-        temperature: 0.5,
-        prompt: promptContext,
-        maxRetries: 3,
-      });
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`⏱️  Completed in ${duration}s`);
 
-      const prompts = object.prompts.map((entry, index) => ({
-        id: `${label}-${index + 1}`,
-        prompt: entry.prompt.trim(),
-        category: entry.category,
-      }));
+    const prompts = object.prompts.map((entry, index) => ({
+      id: `Claude-${index + 1}`,
+      prompt: entry.prompt.trim(),
+      category: entry.category,
+    }));
 
-      promptSets.push(prompts);
-    } catch (error) {
-      console.error(`[generatePromptsForCompany] Prompt generation failed for ${label}:`, error);
-    }
-  };
+    console.log(`✅ Generated ${prompts.length} prompts`);
+    console.log('═'.repeat(80) + '\n');
 
-  await Promise.all([
-    runPromptGeneration(openAIModel, 'openai'),
-    runPromptGeneration(perplexityModel, 'perplexity'),
-  ]);
-
-  const mergedPrompts = mergePromptSets(promptSets, company, competitors);
-
-  if (!mergedPrompts.length) {
-    console.warn('[generatePromptsForCompany] No prompts generated from providers, reverting to heuristics.');
-    return getHeuristicPrompts(company, competitors);
+    return prompts;
+  } catch (error) {
+    console.error(`❌ Claude 4 Sonnet prompt generation failed:`, error instanceof Error ? error.message : error);
+    console.warn('\n⚠️  Falling back to heuristic prompts due to error.');
+    const heuristicPrompts = getHeuristicPrompts(company, competitors);
+    console.log(`✅ Generated ${heuristicPrompts.length} heuristic prompts`);
+    console.log('═'.repeat(80) + '\n');
+    return heuristicPrompts;
   }
-
-  return mergedPrompts;
 }
 
 function buildPromptGenerationPrompt(company: Company, competitors: string[]): string {
@@ -660,7 +673,7 @@ Examples of mentions to catch:
     try {
       // Use a fast model for structured output if available
       const structuredModel = (normalizedProvider === 'anthropic' || normalizedProvider === 'google')
-        ? getProviderModel('openai', 'gpt-4o-mini') || model
+        ? getProviderModel('openai', 'gpt-5-mini') || model
         : model;
       
       const result = await generateObject({
@@ -703,7 +716,7 @@ Look for mentions of "${brandName}" and competitors: ${competitors.join(', ')}
 Return ONLY the JSON object, no other text.`;
 
         const structuredModel = (normalizedProvider === 'anthropic' || normalizedProvider === 'google')
-          ? getProviderModel('openai', 'gpt-4o-mini') || model
+          ? getProviderModel('openai', 'gpt-5-mini') || model
           : model;
         
         const result = await generateObject({
@@ -967,7 +980,7 @@ export async function analyzeCompetitors(
   const competitorMap = new Map<string, {
     mentions: number;
     positions: number[];
-    sentiments: ('positive' | 'neutral' | 'negative')[];
+    sentiments: ('positive' | 'neutral' | 'negative' | 'mixed')[];
   }>();
 
   // Initialize all tracked companies
@@ -1053,22 +1066,23 @@ export async function analyzeCompetitors(
   return competitors.sort((a, b) => b.visibilityScore - a.visibilityScore);
 }
 
-function calculateSentimentScore(sentiments: ('positive' | 'neutral' | 'negative')[]): number {
+function calculateSentimentScore(sentiments: ('positive' | 'neutral' | 'negative' | 'mixed')[]): number {
   if (sentiments.length === 0) return 50;
   
-  const sentimentValues = { positive: 100, neutral: 50, negative: 0 };
+  const sentimentValues = { positive: 100, neutral: 50, negative: 0, mixed: 50 };
   const sum = sentiments.reduce((acc, s) => acc + sentimentValues[s], 0);
   return Math.round(sum / sentiments.length);
 }
 
-function determineSentiment(sentiments: ('positive' | 'neutral' | 'negative')[]): 'positive' | 'neutral' | 'negative' {
+function determineSentiment(sentiments: ('positive' | 'neutral' | 'negative' | 'mixed')[]): 'positive' | 'neutral' | 'negative' | 'mixed' {
   if (sentiments.length === 0) return 'neutral';
   
-  const counts = { positive: 0, neutral: 0, negative: 0 };
+  const counts = { positive: 0, neutral: 0, negative: 0, mixed: 0 };
   sentiments.forEach(s => counts[s]++);
   
-  if (counts.positive > counts.negative && counts.positive > counts.neutral) return 'positive';
-  if (counts.negative > counts.positive && counts.negative > counts.neutral) return 'negative';
+  if (counts.positive > counts.negative && counts.positive > counts.neutral && counts.positive > counts.mixed) return 'positive';
+  if (counts.negative > counts.positive && counts.negative > counts.neutral && counts.negative > counts.mixed) return 'negative';
+  if (counts.mixed > counts.positive && counts.mixed > counts.neutral && counts.mixed > counts.negative) return 'mixed';
   return 'neutral';
 }
 
@@ -1148,7 +1162,7 @@ export async function analyzeCompetitorsByProvider(
   const providerData = new Map<string, Map<string, {
     mentions: number;
     positions: number[];
-    sentiments: ('positive' | 'neutral' | 'negative')[];
+    sentiments: ('positive' | 'neutral' | 'negative' | 'mixed')[];
   }>>();
 
   // Initialize for each provider

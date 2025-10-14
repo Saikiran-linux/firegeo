@@ -36,8 +36,8 @@ export async function analyzeBrandWithProviderSearch(
 // Each provider should use their own search capabilities:
 // 
 // OpenAI with Web Search:
-//   - Use openai.responses('gpt-4o-mini') with web_search_preview tool
-//   - Only gpt-4o-mini supports web search via responses API
+//   - Use openai.responses with web_search_preview tool
+//   - GPT-5 models and gpt-4o-mini support web search via responses API
 //
 // Google with Search Grounding:
 //   - Use { useSearchGrounding: true } option

@@ -9,13 +9,13 @@ const RankingSchema = z.object({
     position: z.number().nullable().optional(),
     company: z.string(),
     reason: z.string().optional(),
-    sentiment: z.enum(['positive', 'neutral', 'negative']).optional(),
+    sentiment: z.enum(['positive', 'neutral', 'negative', 'mixed']).optional(),
   })),
   analysis: z.object({
     brandMentioned: z.boolean(),
     brandPosition: z.number().nullable().optional(),
     competitors: z.array(z.string()),
-    overallSentiment: z.enum(['positive', 'neutral', 'negative']),
+    overallSentiment: z.enum(['positive', 'neutral', 'negative', 'mixed']),
     confidence: z.number().min(0).max(1),
   }),
 });
@@ -95,7 +95,7 @@ Be very thorough in detecting company names - they might appear in different con
     let object;
     try {
       // Use a fast model for structured output
-      const analysisModel = getProviderModel('openai', 'gpt-4o-mini');
+      const analysisModel = getProviderModel('openai', 'gpt-5-mini');
       if (!analysisModel) {
         throw new Error('Analysis model not available');
       }
@@ -114,7 +114,7 @@ Be very thorough in detecting company names - they might appear in different con
       
       // Try with more explicit instructions
       try {
-        const analysisModel = getProviderModel('openai', 'gpt-4o-mini');
+        const analysisModel = getProviderModel('openai', 'gpt-5-mini');
         if (analysisModel) {
           const explicitPrompt = `Analyze this text and return ONLY a JSON object with this exact structure:
 

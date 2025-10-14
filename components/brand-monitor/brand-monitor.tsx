@@ -286,6 +286,7 @@ export function BrandMonitor({
 
       let competitors: IdentifiedCompetitor[] = [];
       let aiCompetitors: string[] = [];
+      let competitorsWithType: Array<{ name: string; type: 'direct' | 'regional' | 'international' }> = [];
 
       try {
         const response = await fetch('/api/brand-monitor/identify-competitors', {
@@ -300,60 +301,46 @@ export function BrandMonitor({
         }
 
         const data = await response.json();
-        aiCompetitors = (data.competitors || []) as string[];
+        competitorsWithType = (data.competitors || []) as Array<{ name: string; type: 'direct' | 'regional' | 'international' }>;
+        aiCompetitors = competitorsWithType.map(c => c.name);
       } catch (error) {
         console.error('Failed to fetch AI competitors:', error);
       }
 
       if (aiCompetitors.length > 0) {
-        competitors = aiCompetitors.map(name => {
+        competitors = aiCompetitors.map((name, index) => {
           const normalizedName = normalizeCompetitorName(name);
           const url = assignUrlToCompetitor(normalizedName) || assignUrlToCompetitor(name);
+          const competitorData = competitorsWithType.find(c => c.name === name);
+          
           return {
             name,
             url,
+            type: competitorData?.type || 'direct',
           } as IdentifiedCompetitor;
         });
 
         dispatch({ type: 'SET_AI_COMPETITORS', payload: aiCompetitors });
-      } 
-
-      if (competitors.length === 0) {
+      } else {
+        // Only use scraped competitors as fallback, no industry defaults
         const extractedCompetitors = company.scrapedData?.competitors || [];
-        const industryCompetitors = getIndustryCompetitors(company.industry || '');
-
-        const competitorMap = new Map<string, IdentifiedCompetitor>();
-
-        industryCompetitors.forEach(comp => {
-          const normalizedName = normalizeCompetitorName(comp.name);
-          competitorMap.set(normalizedName, comp as IdentifiedCompetitor);
-        });
-
-        extractedCompetitors.forEach(name => {
-          const normalizedName = normalizeCompetitorName(name);
-          const existing = competitorMap.get(normalizedName);
-          if (existing) {
-            if (!existing.url) {
-              const url = assignUrlToCompetitor(name);
-              competitorMap.set(normalizedName, { name, url });
-            }
-            return;
-          }
-          const url = assignUrlToCompetitor(name);
-          competitorMap.set(normalizedName, { name, url });
-        });
-
-        competitors = Array.from(competitorMap.values())
-          .filter(comp => comp.name !== 'Competitor 1' && comp.name !== 'Competitor 2' && 
-                          comp.name !== 'Competitor 3' && comp.name !== 'Competitor 4' && 
-                          comp.name !== 'Competitor 5')
-          .slice(0, 6);
-
-        dispatch({ type: 'SET_AI_COMPETITORS', payload: [] });
+        
+        if (extractedCompetitors.length > 0) {
+          competitors = extractedCompetitors.map(name => {
+            const normalizedName = normalizeCompetitorName(name);
+            const url = assignUrlToCompetitor(normalizedName) || assignUrlToCompetitor(name);
+            return {
+              name,
+              url,
+            } as IdentifiedCompetitor;
+          }).slice(0, 9);
+          
+          dispatch({ type: 'SET_AI_COMPETITORS', payload: [] });
+        }
       }
 
       if (competitors.length === 0) {
-        dispatch({ type: 'SET_ERROR', payload: 'We could not identify competitors for this brand. Please add them manually.' });
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to identify competitors for this brand. Please add them manually using the "Add Competitor" button.' });
       }
 
       dispatch({ type: 'SET_IDENTIFIED_COMPETITORS', payload: competitors });
@@ -397,10 +384,12 @@ export function BrandMonitor({
           }
         } else {
           console.warn('Failed to generate prompts, using defaults');
+          dispatch({ type: 'SET_GENERATED_PROMPTS', payload: [] });
         }
       } catch (error) {
         console.error('Error generating prompts:', error);
         // Fallback to defaults if generation fails
+        dispatch({ type: 'SET_GENERATED_PROMPTS', payload: [] });
       }
     }, 300);
   }, [company, identifiedCompetitors]);
@@ -426,14 +415,18 @@ export function BrandMonitor({
     const serviceType = detectServiceType(company);
     const serviceTypeForPrompt = formatServiceTypeForPrompt(serviceType);
     const currentYear = new Date().getFullYear();
-  const defaultPrompts = generatedPrompts.length
-      ? generatedPrompts.map(prompt => prompt.prompt)
-      : [
-          `What are the best ${serviceTypeForPrompt} in ${currentYear}?`,
-          `I need a ${serviceType} for my startup, what do you recommend?`,
-          `Top ${serviceTypeForPrompt} for small businesses?`,
-          `Which ${serviceType} should I choose for my team?`
-        ].filter((_, index) => !removedDefaultPrompts.includes(index));
+    
+    // Create hardcoded prompts with stable IDs
+    const hardcodedPrompts = [
+      { id: `default-0`, prompt: `What are the best ${serviceTypeForPrompt} in ${currentYear}?` },
+      { id: `default-1`, prompt: `I need a ${serviceType} for my startup, what do you recommend?` },
+      { id: `default-2`, prompt: `Top ${serviceTypeForPrompt} for small businesses?` },
+      { id: `default-3`, prompt: `Which ${serviceType} should I choose for my team?` }
+    ];
+    
+    const defaultPrompts = generatedPrompts.length
+      ? generatedPrompts.filter(p => !removedDefaultPrompts.includes(p.id)).map(prompt => prompt.prompt)
+      : hardcodedPrompts.filter(p => !removedDefaultPrompts.includes(p.id)).map(p => p.prompt);
 
     const allPrompts = [...defaultPrompts, ...customPrompts];
     
@@ -564,7 +557,7 @@ export function BrandMonitor({
           removedDefaultPrompts={removedDefaultPrompts}
           promptCompletionStatus={promptCompletionStatus}
           generatedPrompts={generatedPrompts}
-          onRemoveDefaultPrompt={(index) => dispatch({ type: 'REMOVE_DEFAULT_PROMPT', payload: index })}
+          onRemoveDefaultPrompt={(id) => dispatch({ type: 'REMOVE_DEFAULT_PROMPT', payload: id })}
           onRemoveCustomPrompt={(prompt) => {
             dispatch({ type: 'SET_CUSTOM_PROMPTS', payload: customPrompts.filter(p => p !== prompt) });
           }}

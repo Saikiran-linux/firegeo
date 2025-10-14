@@ -141,27 +141,44 @@ export async function performAnalysis({
   // Filter providers based on available API keys
   const availableProviders = getAvailableProviders();
   
-  console.log('Available providers for analysis:', availableProviders.map(p => p.name));
-  console.log('Available provider details:', availableProviders.map(p => ({ name: p.name, model: p.model })));
-  console.log('Environment variables:', {
-    hasOpenAI: !!process.env.OPENAI_API_KEY,
-    hasAnthropic: !!process.env.ANTHROPIC_API_KEY,
-    hasGoogle: !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-    hasPerplexity: !!process.env.PERPLEXITY_API_KEY
+  console.log('\n' + '═'.repeat(80));
+  console.log('🔬 ANALYSIS PHASE - PROVIDER CONFIGURATION');
+  console.log('═'.repeat(80));
+  console.log('📊 Available Providers:', availableProviders.length);
+  availableProviders.forEach((p, idx) => {
+    console.log(`   ${idx + 1}. ${p.name} - Model: ${p.model}`);
   });
-  console.log('Web search enabled:', useWebSearch);
-  console.log('Number of prompts:', analysisPrompts.length);
-  console.log('Number of available providers:', availableProviders.length);
+  console.log('\n🔑 API Keys Status:');
+  console.log(`   ${process.env.OPENAI_API_KEY ? '✅' : '❌'} OpenAI`);
+  console.log(`   ${process.env.ANTHROPIC_API_KEY ? '✅' : '❌'} Anthropic`);
+  console.log(`   ${process.env.GOOGLE_GENERATIVE_AI_API_KEY ? '✅' : '❌'} Google`);
+  console.log(`   ${process.env.PERPLEXITY_API_KEY ? '✅' : '❌'} Perplexity`);
+  console.log(`\n🌐 Web Search: ${useWebSearch ? '✅ ENABLED' : '❌ DISABLED'}`);
+  if (useWebSearch) {
+    console.log(`   🔍 OpenAI (gpt-5-chat-latest): Web search enabled via enhanced prompts`);
+    console.log(`   🔍 Perplexity (sonar): Built-in web search`);
+    console.log(`   🔍 Google (gemini-2.5-flash): Native search grounding`);
+  }
+  console.log(`\n📝 Prompts to analyze: ${analysisPrompts.length}`);
+  analysisPrompts.forEach((p, idx) => {
+    console.log(`   ${idx + 1}. [${p.category}] ${p.prompt.substring(0, 60)}...`);
+  });
   
   const totalAnalyses = analysisPrompts.length * availableProviders.length;
   let completedAnalyses = 0;
-  console.log('Total analyses to perform:', totalAnalyses);
+  console.log(`\n📈 Total analyses to perform: ${totalAnalyses} (${analysisPrompts.length} prompts × ${availableProviders.length} providers)`);
+  console.log('═'.repeat(80));
 
   // Check if we should use mock mode (no API keys configured)
   const useMockMode = process.env.USE_MOCK_MODE === 'true' || availableProviders.length === 0;
 
+  if (useMockMode) {
+    console.log('\n⚠️  MOCK MODE: No real API calls will be made\n');
+  }
+
   // Process prompts in parallel batches of 3
   const BATCH_SIZE = 3;
+  console.log(`\n🔄 Processing in batches of ${BATCH_SIZE} prompts...\n`);
   
   for (let batchStart = 0; batchStart < analysisPrompts.length; batchStart += BATCH_SIZE) {
     const batchEnd = Math.min(batchStart + BATCH_SIZE, analysisPrompts.length);
@@ -189,8 +206,13 @@ export async function performAnalysis({
         });
 
         try {
-          // Debug log for each provider attempt
-          console.log(`Attempting analysis with provider: ${provider.name} for prompt: "${prompt.prompt.substring(0, 50)}..."`);
+          // Log each provider attempt with detailed info
+          console.log(`\n🎯 [${provider.name}] Starting analysis...`);
+          console.log(`   📝 Prompt: "${prompt.prompt.substring(0, 70)}..."`);
+          console.log(`   🤖 Model: ${provider.model}`);
+          console.log(`   🌐 Web Search: ${useWebSearch ? 'Enabled' : 'Disabled'}`);
+          
+          const analysisStartTime = Date.now();
           
           // Use enhanced version when web search is enabled, otherwise use regular version
           // Both versions now support the useWebSearch parameter
@@ -205,15 +227,19 @@ export async function performAnalysis({
             useWebSearch // Pass web search flag to both versions
           );
           
-          console.log(`Analysis completed for ${provider.name}:`, {
-            hasResponse: !!response,
-            provider: response?.provider,
-            brandMentioned: response?.brandMentioned
-          });
+          const analysisDuration = ((Date.now() - analysisStartTime) / 1000).toFixed(2);
+          
+          if (response) {
+            console.log(`   ✅ Completed in ${analysisDuration}s`);
+            console.log(`   🎯 Brand mentioned: ${response.brandMentioned ? 'YES' : 'NO'}${response.brandPosition ? ` (Position: #${response.brandPosition})` : ''}`);
+            console.log(`   💭 Sentiment: ${response.sentiment}`);
+            console.log(`   👥 Competitors in response: ${response.competitors.length}`);
+          } else {
+            console.log(`   ⏭️  Skipped in ${analysisDuration}s`);
+          }
           
           // Skip if provider returned null (not configured)
           if (response === null) {
-            console.log(`Skipping ${provider.name} - not configured`);
             
             // Send analysis complete event with skipped status
             await sendEvent({
@@ -275,7 +301,7 @@ export async function performAnalysis({
           });
 
         } catch (error) {
-          console.error(`Error with ${provider.name} for prompt "${prompt.prompt}":`, error);
+          console.error(`\n❌ [${provider.name}] Analysis failed:`, error instanceof Error ? error.message : error);
           errors.push(`${provider.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
           
           // Send analysis failed event
@@ -313,9 +339,20 @@ export async function performAnalysis({
     
     // Wait for all promises in this batch to complete
     await Promise.all(batchPromises);
+    
+    console.log(`\n✅ Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} complete (${completedAnalyses}/${totalAnalyses} total analyses done)`);
   }
 
+  console.log('\n' + '═'.repeat(80));
+  console.log(`🎉 ALL ANALYSES COMPLETE: ${completedAnalyses}/${totalAnalyses} successful`);
+  console.log(`📊 Responses collected: ${responses.length}`);
+  if (errors.length > 0) {
+    console.log(`⚠️  Errors encountered: ${errors.length}`);
+  }
+  console.log('═'.repeat(80));
+
   // Stage 4: Calculate scores
+  console.log('\n💯 Starting score calculation phase...');
   await sendEvent({
     type: 'stage',
     stage: 'calculating-scores',
@@ -328,7 +365,9 @@ export async function performAnalysis({
   });
 
   // Analyze competitors from all responses
+  console.log('📊 Analyzing competitor rankings from all responses...');
   const competitorRankings = await analyzeCompetitors(company, responses, competitors);
+  console.log(`✅ Analyzed ${competitorRankings.length} competitors`);
 
   // Send scoring progress for each competitor
   for (let i = 0; i < competitorRankings.length; i++) {

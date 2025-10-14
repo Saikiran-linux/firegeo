@@ -31,7 +31,7 @@ export interface CompetitorAnalysis {
   visibilityScore: number;
   mentionCount: number;
   averagePosition: number;
-  sentiment: 'positive' | 'neutral' | 'negative';
+  sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
   sentimentScore: number;
   shareOfVoice: number;
   weeklyChange?: number;
@@ -92,7 +92,7 @@ export interface AIResponse {
   competitors: string[];
   brandMentioned: boolean;
   brandPosition?: number;
-  sentiment: 'positive' | 'neutral' | 'negative';
+  sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
   confidence: number;
   timestamp: Date;
   // Enhanced detection information
@@ -118,7 +118,7 @@ export interface CompanyRanking {
   position: number;
   company: string;
   reason?: string;
-  sentiment?: 'positive' | 'neutral' | 'negative';
+  sentiment?: 'positive' | 'neutral' | 'negative' | 'mixed';
 }
 
 export interface BrandAnalysis {
@@ -232,7 +232,7 @@ export interface CompetitorRanking {
   logo?: string;
   mentions: number;
   averagePosition: number;
-  sentiment: 'positive' | 'neutral' | 'negative';
+  sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
   sentimentScore: number;
   shareOfVoice: number;
   visibilityScore: number;
@@ -252,7 +252,7 @@ export interface ProviderComparisonData {
       visibilityScore: number;
       position: number;
       mentions: number;
-      sentiment: 'positive' | 'neutral' | 'negative';
+      sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
     };
   };
   isOwn?: boolean;

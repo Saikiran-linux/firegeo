@@ -15,7 +15,7 @@ export type BrandMonitorAction =
   | { type: 'SET_SHOW_COMPETITORS'; payload: boolean }
   | { type: 'SET_CUSTOM_PROMPTS'; payload: string[] }
   | { type: 'ADD_CUSTOM_PROMPT'; payload: string }
-  | { type: 'REMOVE_DEFAULT_PROMPT'; payload: number }
+  | { type: 'REMOVE_DEFAULT_PROMPT'; payload: string }
   | { type: 'SET_AVAILABLE_PROVIDERS'; payload: string[] }
   | { type: 'SET_GENERATED_PROMPTS'; payload: BrandPrompt[] }
   | { type: 'SET_IDENTIFIED_COMPETITORS'; payload: IdentifiedCompetitor[] }
@@ -45,6 +45,7 @@ export type BrandMonitorAction =
 export interface IdentifiedCompetitor {
   name: string;
   url?: string;
+  type?: 'direct' | 'regional' | 'international';
   metadata?: CompetitorMetadata;
   loading?: boolean;
 }
@@ -83,7 +84,7 @@ export interface AnalysisTile {
     result?: {
       brandMentioned: boolean;
       brandPosition?: number;
-      sentiment: 'positive' | 'neutral' | 'negative';
+      sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
     };
   }[];
 }
@@ -132,7 +133,7 @@ export interface BrandMonitorState {
   
   // Prompts
   customPrompts: string[];
-  removedDefaultPrompts: number[];
+  removedDefaultPrompts: string[];
   analyzingPrompts: string[];
   generatedPrompts: BrandPrompt[];
   

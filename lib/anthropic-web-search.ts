@@ -184,16 +184,35 @@ Return ONLY the JSON object, no other text.`,
 
       let braceCount = 0;
       let closingIndex = -1;
+      let inString = false;
+      let lastWasEscape = false;
 
       for (let i = firstBraceIndex; i < analysisText.length; i++) {
         const char = analysisText[i];
-        if (char === '{') {
-          braceCount++;
-        } else if (char === '}') {
-          braceCount--;
-          if (braceCount === 0) {
-            closingIndex = i;
-            break;
+        
+        // Handle string toggling
+        if (char === '"' && !lastWasEscape) {
+          inString = !inString;
+        }
+        
+        // Track escape sequences
+        if (char === '\\' && !lastWasEscape) {
+          lastWasEscape = true;
+          continue;
+        } else {
+          lastWasEscape = false;
+        }
+        
+        // Only count braces outside of strings
+        if (!inString) {
+          if (char === '{') {
+            braceCount++;
+          } else if (char === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              closingIndex = i;
+              break;
+            }
           }
         }
       }

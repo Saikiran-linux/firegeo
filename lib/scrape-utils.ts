@@ -43,7 +43,7 @@ export class ScrapeServiceError extends Error {
 
 function sanitizeUrl(url: string): string {
   let normalized = url.trim();
-  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(normalized);
+  const hasScheme = /^https?:\/\//i.test(normalized);
   if (!hasScheme) {
     normalized = `https://${normalized}`;
   }
@@ -172,11 +172,12 @@ async function runFirecrawlStrategy(
 ): Promise<ScrapePayload> {
   try {
     const response = await firecrawl.scrapeUrl(url, strategy.options);
+    const statusCode = (response as any).metadata?.statusCode;
     if (!response.success) {
       throw new ScrapeServiceError(
         response.error || `Firecrawl scrape failed (${strategy.name})`,
         'firecrawl',
-        undefined,
+        statusCode,
         response,
       );
     }

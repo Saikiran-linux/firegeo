@@ -139,6 +139,8 @@ export function ProviderRankingsTabs({
         return <Badge variant="secondary" className="bg-green-50 text-black text-xs">Positive</Badge>;
       case 'negative':
         return <Badge variant="secondary" className="bg-red-50 text-black text-xs">Negative</Badge>;
+      case 'mixed':
+        return <Badge variant="secondary" className="bg-yellow-50 text-black text-xs">Mixed</Badge>;
       default:
         return <Badge variant="secondary" className="bg-gray-50 text-black text-xs">Neutral</Badge>;
     }

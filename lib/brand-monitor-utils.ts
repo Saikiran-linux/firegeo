@@ -282,7 +282,16 @@ export function formatServiceTypeForPrompt(serviceType: string): string {
 
   const prior = words.slice(0, -1).join(' ');
   if (!containsWholeWord(prior, lowerLast)) {
-    return `${result}s`;
+    // Pluralize only the last word properly using the pluralize utility
+    const pluralizedLast = pluralize(lastWord.toLowerCase());
+    const casedPluralLast = applyCase(lastWord, pluralizedLast);
+    
+    // Rebuild the phrase with the pluralized last word
+    if (prior) {
+      return `${prior} ${casedPluralLast}`;
+    } else {
+      return casedPluralLast;
+    }
   }
 
   return result;

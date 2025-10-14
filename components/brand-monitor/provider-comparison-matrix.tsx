@@ -12,6 +12,7 @@ interface ProviderComparisonMatrixProps {
   competitors?: { 
     name: string; 
     url?: string;
+    type?: 'direct' | 'regional' | 'international';
     metadata?: {
       ogImage?: string;
       favicon?: string;
@@ -229,6 +230,7 @@ export function ProviderComparisonMatrix({ data, brandName, competitors }: Provi
                     isOwn={competitor.isOwn}
                     favicon={competitorData?.metadata?.favicon}
                     url={competitorData?.url || fallbackUrl}
+                    type={competitorData?.type}
                   />
                 </td>
                 {providers.map((provider, index) => {

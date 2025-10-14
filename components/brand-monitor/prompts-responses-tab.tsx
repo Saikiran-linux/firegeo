@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { ChevronDown, ChevronsDown, ChevronsUp, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { BrandPrompt, AIResponse } from '@/lib/types';
 import { HighlightedResponse } from './highlighted-response';
@@ -68,6 +68,7 @@ export function PromptsResponsesTab({
 }: PromptsResponsesTabProps) {
   const [allExpanded, setAllExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   
   const handleExpandAll = () => {
     if (allExpanded) {
@@ -78,6 +79,16 @@ export function PromptsResponsesTab({
       // Expand all - we'll use -1 as a special value to indicate all expanded
       setAllExpanded(true);
       onToggleExpand(-1);
+    }
+  };
+  
+  const handleCopyPrompt = async (promptText: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy prompt:', err);
     }
   };
   
@@ -207,6 +218,22 @@ export function PromptsResponsesTab({
                     </Badge>
                   )}
                 </div>
+                
+                {/* Copy button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopyPrompt(promptData.prompt, idx);
+                  }}
+                  className="p-1.5 rounded-md hover:bg-gray-100 transition-colors shrink-0 text-gray-500 hover:text-gray-700"
+                  title="Copy prompt"
+                >
+                  {copiedIndex === idx ? (
+                    <Check className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </button>
                 
                 {/* Provider icons preview - deduplicated and ordered */}
                 <div className="flex items-center gap-2 shrink-0">

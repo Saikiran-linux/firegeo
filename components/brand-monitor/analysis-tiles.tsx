@@ -12,7 +12,7 @@ interface AnalysisTile {
     result?: {
       brandMentioned: boolean;
       brandPosition?: number;
-      sentiment: 'positive' | 'neutral' | 'negative';
+      sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
     };
   }[];
 }
@@ -84,6 +84,7 @@ export function AnalysisTiles({ tiles }: AnalysisTilesProps) {
                             <span className={`text-xs font-medium ${
                               provider.result.sentiment === 'positive' ? 'text-green-700' :
                               provider.result.sentiment === 'negative' ? 'text-red-700' :
+                              provider.result.sentiment === 'mixed' ? 'text-yellow-700' :
                               'text-gray-700'
                             }`}>
                               {provider.result.sentiment}
