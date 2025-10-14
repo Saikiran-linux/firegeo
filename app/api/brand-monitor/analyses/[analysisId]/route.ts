@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { brandAnalyses } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { handleApiError, AuthenticationError, NotFoundError } from '@/lib/api-errors';
+import { reconstructCitationAnalysis } from '@/lib/db/citations';
 
 // GET /api/brand-monitor/analyses/[analysisId] - Get a specific analysis
 export async function GET(
@@ -32,7 +33,52 @@ export async function GET(
       throw new NotFoundError('Analysis not found');
     }
 
-    return NextResponse.json(analysis);
+    // Reconstruct citation analysis from database if not already in the analysis data
+    let citationAnalysis = null;
+    
+    // Check if we need to reconstruct citation analysis
+    // This will be the case if we have citations in the database but not in the stored analysisData
+    const analysisData = analysis.analysisData as any;
+    const hasStoredCitations = analysisData?.citationAnalysis && 
+                               Object.keys(analysisData.citationAnalysis).length > 0;
+    
+    if (!hasStoredCitations) {
+      console.log(`[GetAnalysis] No stored citations, attempting to reconstruct from database`);
+      const brandName = analysis.companyName || (analysisData?.company?.name);
+      const competitors = analysisData?.knownCompetitors || 
+                         (Array.isArray(analysis.competitors) ? analysis.competitors : []);
+      
+      if (brandName && competitors) {
+        try {
+          citationAnalysis = await reconstructCitationAnalysis(
+            analysisId,
+            brandName,
+            competitors
+          );
+          
+          if (citationAnalysis) {
+            console.log(`[GetAnalysis] Successfully reconstructed citation analysis with ${citationAnalysis.totalSources} sources`);
+          }
+        } catch (error) {
+          console.error(`[GetAnalysis] Error reconstructing citation analysis:`, error);
+          // Don't fail the request if citation reconstruction fails
+        }
+      }
+    } else {
+      console.log(`[GetAnalysis] Using stored citation analysis`);
+      citationAnalysis = analysisData.citationAnalysis;
+    }
+
+    // Return the analysis with citation analysis (either from storage or reconstructed)
+    const response = {
+      ...analysis,
+      analysisData: {
+        ...analysisData,
+        citationAnalysis: citationAnalysis || analysisData?.citationAnalysis
+      }
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
     return handleApiError(error);
   }

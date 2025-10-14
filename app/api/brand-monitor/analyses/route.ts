@@ -4,6 +4,8 @@ import { db } from '@/lib/db';
 import { brandAnalyses } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { handleApiError, AuthenticationError, ValidationError } from '@/lib/api-errors';
+import { saveCitations, saveAggregatedSources } from '@/lib/db/citations';
+import { AIResponse, CitationAnalysis } from '@/lib/types';
 
 // GET /api/brand-monitor/analyses - Get user's brand analyses
 export async function GET(request: NextRequest) {
@@ -57,6 +59,39 @@ export async function POST(request: NextRequest) {
       prompts: body.prompts,
       creditsUsed: body.creditsUsed || 10,
     }).returning();
+
+    // Save citations if available
+    if (body.responses && Array.isArray(body.responses)) {
+      console.log(`[SaveAnalysis] Processing ${body.responses.length} responses for citations`);
+      
+      for (const response of body.responses as AIResponse[]) {
+        if (response.citations && response.citations.length > 0) {
+          try {
+            await saveCitations(
+              analysis.id,
+              response.provider,
+              response.prompt, // Use prompt as promptId
+              response.citations
+            );
+            console.log(`[SaveAnalysis] Saved ${response.citations.length} citations for provider ${response.provider}`);
+          } catch (error) {
+            console.error(`[SaveAnalysis] Error saving citations for provider ${response.provider}:`, error);
+            // Don't fail the entire save if citations fail
+          }
+        }
+      }
+    }
+
+    // Save aggregated citation sources if available
+    if (body.citationAnalysis) {
+      try {
+        await saveAggregatedSources(analysis.id, body.citationAnalysis as CitationAnalysis);
+        console.log(`[SaveAnalysis] Saved aggregated citation sources`);
+      } catch (error) {
+        console.error(`[SaveAnalysis] Error saving aggregated sources:`, error);
+        // Don't fail the entire save if aggregated sources fail
+      }
+    }
 
     return NextResponse.json(analysis);
   } catch (error) {

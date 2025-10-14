@@ -105,11 +105,57 @@ export const brandAnalyses = pgTable('brand_analyses', {
   updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()),
 });
 
+// Citations table - stores individual citations from AI responses
+export const citations = pgTable('citations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  analysisId: uuid('analysis_id').notNull().references(() => brandAnalyses.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(), // Which AI provider returned this citation
+  promptId: text('prompt_id'), // Optional: which prompt this citation came from
+  url: text('url').notNull(),
+  title: text('title'),
+  snippet: text('snippet'),
+  source: text('source'), // Domain or source name
+  date: text('date'), // Publication date if available
+  position: integer('position'), // Position in results if applicable
+  mentionedCompanies: jsonb('mentioned_companies').$type<string[]>(), // Companies mentioned in this citation
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Citation Sources table - aggregated source information across all citations
+export const citationSources = pgTable('citation_sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  analysisId: uuid('analysis_id').notNull().references(() => brandAnalyses.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  domain: text('domain').notNull(),
+  title: text('title'),
+  frequency: integer('frequency').notNull().default(1), // How many times this source was cited
+  providers: jsonb('providers').$type<string[]>().notNull(), // Which providers cited this source
+  mentionedCompanies: jsonb('mentioned_companies').$type<string[]>(), // All companies mentioned in this source
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()),
+});
+
 // Relations
-export const brandAnalysesRelations = relations(brandAnalyses, ({ one }) => ({
+export const brandAnalysesRelations = relations(brandAnalyses, ({ one, many }) => ({
   userProfile: one(userProfile, {
     fields: [brandAnalyses.userId],
     references: [userProfile.userId],
+  }),
+  citations: many(citations),
+  citationSources: many(citationSources),
+}));
+
+export const citationsRelations = relations(citations, ({ one }) => ({
+  analysis: one(brandAnalyses, {
+    fields: [citations.analysisId],
+    references: [brandAnalyses.id],
+  }),
+}));
+
+export const citationSourcesRelations = relations(citationSources, ({ one }) => ({
+  analysis: one(brandAnalyses, {
+    fields: [citationSources.analysisId],
+    references: [brandAnalyses.id],
   }),
 }));
 
@@ -126,3 +172,7 @@ export type UserSettings = typeof userSettings.$inferSelect;
 export type NewUserSettings = typeof userSettings.$inferInsert;
 export type BrandAnalysis = typeof brandAnalyses.$inferSelect;
 export type NewBrandAnalysis = typeof brandAnalyses.$inferInsert;
+export type Citation = typeof citations.$inferSelect;
+export type NewCitation = typeof citations.$inferInsert;
+export type CitationSource = typeof citationSources.$inferSelect;
+export type NewCitationSource = typeof citationSources.$inferInsert;

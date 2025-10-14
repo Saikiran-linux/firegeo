@@ -1,7 +1,8 @@
-import { AIResponse, AnalysisProgressData, Company, PartialResultData, ProgressData, PromptGeneratedData, ScoringProgressData, SSEEvent } from './types';
+import { AIResponse, AnalysisProgressData, Company, PartialResultData, ProgressData, PromptGeneratedData, ScoringProgressData, SSEEvent, CitationAnalysis } from './types';
 import { generatePromptsForCompany, analyzePromptWithProvider, calculateBrandScores, analyzeCompetitors, identifyCompetitors, analyzeCompetitorsByProvider } from './ai-utils';
 import { analyzePromptWithProvider as analyzePromptWithProviderEnhanced } from './ai-utils-enhanced';
 import { getConfiguredProviders } from './provider-config';
+import { analyzeCitations } from './citation-utils';
 
 const verboseLogging = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
 
@@ -22,6 +23,7 @@ export interface AnalysisResult {
   competitors: any[];
   providerRankings: any;
   providerComparison: any;
+  citationAnalysis?: CitationAnalysis;
   errors?: string[];
   webSearchUsed?: boolean;
 }
@@ -425,6 +427,44 @@ export async function performAnalysis({
     stage: 'finalizing',
     data: {
       stage: 'finalizing',
+      progress: 50,
+      message: 'Analyzing citations...'
+    } as ProgressData,
+    timestamp: new Date()
+  });
+
+  // Analyze citations from responses
+  let citationAnalysis: CitationAnalysis | undefined;
+  try {
+    console.log('\n' + '═'.repeat(80));
+    console.log('📚 CITATION ANALYSIS PHASE');
+    console.log('═'.repeat(80));
+    console.log(`📊 Total responses to analyze: ${responses.length}`);
+    console.log(`🔍 Responses with citations: ${responses.filter(r => r.citations && r.citations.length > 0).length}`);
+    
+    responses.forEach((response, idx) => {
+      if (response.citations && response.citations.length > 0) {
+        console.log(`   ${idx + 1}. ${response.provider}: ${response.citations.length} citations`);
+      }
+    });
+    
+    citationAnalysis = analyzeCitations(responses, company.name, competitors);
+    console.log(`\n✅ Citation Analysis Complete:`);
+    console.log(`   📑 Total unique sources: ${citationAnalysis.totalSources}`);
+    console.log(`   🏢 Brand citations: ${citationAnalysis.brandCitations.totalCitations}`);
+    console.log(`   👥 Competitor citations: ${Object.keys(citationAnalysis.competitorCitations).length} competitors tracked`);
+    console.log(`   🌐 Provider breakdown: ${Object.keys(citationAnalysis.providerBreakdown).length} providers`);
+    console.log('═'.repeat(80) + '\n');
+  } catch (error) {
+    console.error('❌ Failed to analyze citations:', error);
+    // Don't fail the entire analysis if citation analysis fails
+  }
+
+  await sendEvent({
+    type: 'stage',
+    stage: 'finalizing',
+    data: {
+      stage: 'finalizing',
       progress: 100,
       message: 'Analysis complete!'
     } as ProgressData,
@@ -440,6 +480,7 @@ export async function performAnalysis({
     competitors: competitorRankings,
     providerRankings,
     providerComparison,
+    citationAnalysis,
     errors: errors.length > 0 ? errors : undefined,
     webSearchUsed: useWebSearch,
   };

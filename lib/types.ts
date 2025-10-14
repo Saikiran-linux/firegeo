@@ -84,6 +84,16 @@ export interface BrandPrompt {
   category: 'ranking' | 'comparison' | 'alternatives' | 'recommendations';
 }
 
+export interface Citation {
+  url: string;
+  title?: string;
+  snippet?: string;
+  source?: string;
+  date?: string;
+  position?: number;
+  mentionedCompanies?: string[];
+}
+
 export interface AIResponse {
   provider: string;
   prompt: string;
@@ -95,6 +105,7 @@ export interface AIResponse {
   sentiment: 'positive' | 'neutral' | 'negative' | 'mixed';
   confidence: number;
   timestamp: Date;
+  citations?: Citation[]; // New field for citation tracking
   // Enhanced detection information
   detectionDetails?: {
     brandMatches?: {
@@ -121,6 +132,29 @@ export interface CompanyRanking {
   sentiment?: 'positive' | 'neutral' | 'negative' | 'mixed';
 }
 
+export interface CitationAnalysis {
+  totalSources: number;
+  topSources: SourceFrequency[];
+  brandCitations: CitationsByCompany;
+  competitorCitations: Record<string, CitationsByCompany>;
+  providerBreakdown: Record<string, SourceFrequency[]>;
+}
+
+export interface SourceFrequency {
+  url: string;
+  domain: string;
+  title?: string;
+  frequency: number;
+  providers: string[];
+  mentionedCompanies: string[];
+}
+
+export interface CitationsByCompany {
+  totalCitations: number;
+  sources: Citation[];
+  topDomains: string[];
+}
+
 export interface BrandAnalysis {
   company: Company;
   prompts: BrandPrompt[];
@@ -134,6 +168,7 @@ export interface BrandAnalysis {
   shareOfVoice: number;
   averagePosition?: number;
   historicalData?: HistoricalDataPoint[];
+  citationAnalysis?: CitationAnalysis; // New field for citation tracking
 }
 
 export interface HistoricalDataPoint {

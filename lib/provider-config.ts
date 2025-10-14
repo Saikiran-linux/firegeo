@@ -73,6 +73,14 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     enabled: PROVIDER_ENABLED_CONFIG.openai,
     models: [
       {
+        id: 'gpt-5-2025-08-07',
+        name: 'GPT-5 2025-08-07',
+        maxTokens: 200000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
         id: 'gpt-5-chat-latest',
         name: 'GPT-5 Chat Latest',
         maxTokens: 200000,
@@ -129,7 +137,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         supportsWebSearch: false,
       },
     ],
-    defaultModel: 'gpt-5-chat-latest',
+    defaultModel: 'gpt-5-2025-08-07',
     capabilities: {
       webSearch: true, // Via responses API with specific models
       functionCalling: true,
@@ -246,19 +254,13 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
       if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return null;
       const model = google(modelId || PROVIDER_CONFIGS.google.defaultModel);
 
-      // Enable search grounding for web search when supported by SDK version
-      if (options?.useWebSearch) {
-        const configurableModel = (model as any);
-        if (typeof configurableModel?.withConfig === 'function') {
-          try {
-            return configurableModel.withConfig({
-              useSearchGrounding: true,
-            });
-          } catch (error) {
-            console.warn('[provider-config] Failed to apply Google search grounding config, falling back to base model:', error);
-          }
-        }
-      }
+      // Note: Google search grounding is configured via generateText options
+      // The model itself doesn't need special configuration
+      console.log('[provider-config] Google model configured:', {
+        modelId: modelId || PROVIDER_CONFIGS.google.defaultModel,
+        useWebSearch: options?.useWebSearch,
+        note: 'Search grounding enabled via generateText options'
+      });
 
       return model;
     },

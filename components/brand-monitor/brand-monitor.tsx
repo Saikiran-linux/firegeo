@@ -33,6 +33,7 @@ import { AddPromptModal } from './modals/add-prompt-modal';
 import { AddCompetitorModal } from './modals/add-competitor-modal';
 import { ProviderComparisonMatrix } from './provider-comparison-matrix';
 import { ProviderRankingsTabs } from './provider-rankings-tabs';
+import { CitationsTab } from './citations-tab';
 import { useSaveBrandAnalysis } from '@/hooks/useBrandAnalyses';
 
 // Hooks
@@ -74,8 +75,18 @@ export function BrandMonitor({
           analysisData: completedAnalysis,
           competitors: identifiedCompetitors,
           prompts: analyzingPrompts,
-          creditsUsed: CREDITS_PER_BRAND_ANALYSIS
+          creditsUsed: CREDITS_PER_BRAND_ANALYSIS,
+          // Include responses and citationAnalysis for database storage
+          responses: completedAnalysis.responses,
+          citationAnalysis: completedAnalysis.citationAnalysis
         };
+        
+        console.log('[BrandMonitor] Saving analysis with citations:', {
+          hasResponses: !!analysisData.responses,
+          responsesCount: analysisData.responses?.length,
+          hasCitationAnalysis: !!analysisData.citationAnalysis,
+          totalSources: analysisData.citationAnalysis?.totalSources
+        });
         
         saveAnalysis.mutate(analysisData, {
           onSuccess: (savedAnalysis) => {
@@ -701,6 +712,14 @@ export function BrandMonitor({
                       />
                     </CardContent>
                   </Card>
+                )}
+
+                {activeResultsTab === 'citations' && (
+                  <CitationsTab
+                    citationAnalysis={analysis.citationAnalysis}
+                    brandName={company?.name || ''}
+                    competitors={identifiedCompetitors.map(c => c.name)}
+                  />
                 )}
               </div>
             </div>
