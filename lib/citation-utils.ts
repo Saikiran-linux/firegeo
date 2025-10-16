@@ -31,10 +31,12 @@ export function analyzeCitations(
   });
 
   // Process all responses and collect citations
-  responses.forEach(response => {
-    if (!response.citations || response.citations.length === 0) return;
+  responses.forEach((response, respIndex) => {
+    if (!response.citations || response.citations.length === 0) {
+      return;
+    }
 
-    response.citations.forEach(citation => {
+    response.citations.forEach((citation, citIndex) => {
       allCitations.push(citation);
       
       const domain = extractDomain(citation.url);
@@ -167,25 +169,10 @@ export function extractCitationsFromResponse(
 ): Citation[] {
   const citations: Citation[] = [];
 
-  console.log(`[extractCitations] Processing ${provider} response:`, {
-    responseType: typeof response,
-    hasResponse: !!response,
-    responseKeys: response ? Object.keys(response).slice(0, 10) : [],
-    hasToolResults: !!response?.toolResults,
-    hasSteps: !!response?.steps,
-    hasExperimentalProviderMetadata: !!response?.experimental_providerMetadata
-  });
-
   try {
     // First, check for AI SDK's standardized tool results format
     if (response?.toolResults && Array.isArray(response.toolResults)) {
-      console.log(`[extractCitations] Found ${response.toolResults.length} tool results from AI SDK`);
       response.toolResults.forEach((toolResult: any, index: number) => {
-        console.log(`[extractCitations] Tool result ${index}:`, {
-          toolName: toolResult.toolName,
-          hasResult: !!toolResult.result,
-          resultKeys: toolResult.result ? Object.keys(toolResult.result) : []
-        });
         
         if (toolResult.toolName === 'web_search' || toolResult.toolName?.includes('search')) {
           const result = toolResult.result;
@@ -226,7 +213,6 @@ export function extractCitationsFromResponse(
     
     // Check for steps (multi-step tool use)
     if (response?.steps && Array.isArray(response.steps)) {
-      console.log(`[extractCitations] Found ${response.steps.length} steps`);
       response.steps.forEach((step: any) => {
         if (step.toolResults && Array.isArray(step.toolResults)) {
           step.toolResults.forEach((toolResult: any) => {
@@ -257,7 +243,6 @@ export function extractCitationsFromResponse(
     // Check experimental provider metadata
     if (response?.experimental_providerMetadata) {
       const metadata = response.experimental_providerMetadata;
-      console.log(`[extractCitations] Found experimental provider metadata for ${provider}`);
       
       // Google grounding metadata
       if (metadata.google?.groundingMetadata?.groundingChunks) {
@@ -294,7 +279,6 @@ export function extractCitationsFromResponse(
     
     // If no citations found from AI SDK format, fall back to provider-specific formats
     if (citations.length === 0) {
-      console.log(`[extractCitations] No citations from AI SDK format, checking provider-specific formats...`);
       switch (provider.toLowerCase()) {
       case 'anthropic':
         // Anthropic returns citations in text blocks
@@ -382,10 +366,8 @@ export function extractCitationsFromResponse(
         break;
       }
     }
-    
-    console.log(`[extractCitations] ${provider} extracted ${citations.length} citations total`);
   } catch (error) {
-    console.error(`[extractCitations] Error extracting citations from ${provider}:`, error);
+    console.error(`Error extracting citations from ${provider}:`, error);
   }
 
   return citations;
@@ -446,6 +428,7 @@ export function generateSampleCitations(
 
 /**
  * Detect which companies are mentioned in a text snippet
+ * Handles both full names and common variations (e.g., "Ford" for "Ford Motor Company")
  */
 function detectMentionedCompanies(
   text: string,
@@ -455,14 +438,46 @@ function detectMentionedCompanies(
   const mentioned: string[] = [];
   const lowerText = text.toLowerCase();
 
+  // Helper function to check if a company name or its variations appear in text
+  const isCompanyMentioned = (companyName: string): boolean => {
+    const lowerCompany = companyName.toLowerCase();
+    
+    // Direct full match
+    if (lowerText.includes(lowerCompany)) {
+      return true;
+    }
+
+    // Extract core brand name (first word or words before "Inc", "Corp", "Company", etc.)
+    const coreNameMatch = companyName.match(/^([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(?:Motor\s+)?(?:Company|Corporation|Corp|Inc|Ltd|Limited|LLC)/i);
+    if (coreNameMatch) {
+      const coreName = coreNameMatch[1].toLowerCase();
+      // Use word boundary to avoid false matches (e.g., "Ford" shouldn't match "Affordable")
+      const wordBoundaryRegex = new RegExp(`\\b${coreName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (wordBoundaryRegex.test(text)) {
+        return true;
+      }
+    }
+
+    // Check if first significant word appears with word boundaries
+    const firstWord = companyName.split(/\s+/)[0];
+    if (firstWord && firstWord.length > 3) { // Only match meaningful words (length > 3)
+      const wordBoundaryRegex = new RegExp(`\\b${firstWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (wordBoundaryRegex.test(text)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   // Check brand
-  if (lowerText.includes(brandName.toLowerCase())) {
+  if (isCompanyMentioned(brandName)) {
     mentioned.push(brandName);
   }
 
   // Check competitors
   competitors.forEach(comp => {
-    if (lowerText.includes(comp.toLowerCase())) {
+    if (isCompanyMentioned(comp)) {
       mentioned.push(comp);
     }
   });
@@ -481,14 +496,31 @@ export function enhanceCitationsWithMentions(
   brandName: string,
   competitors: string[]
 ): Citation[] {
-  return citations.map(citation => {
-    // For now, we analyze the entire response text
-    // In a more sophisticated version, we could analyze the specific snippet
-    const mentionedCompanies = detectMentionedCompanies(
-      responseText,
-      brandName,
-      competitors
-    );
+  return citations.map((citation, index) => {
+    // If citation already has mentionedCompanies, keep them
+    if (citation.mentionedCompanies && citation.mentionedCompanies.length > 0) {
+      return citation;
+    }
+
+    // Prefer analyzing the citation's own content (title + snippet)
+    const citationContent = [citation.title, citation.snippet].filter(Boolean).join(' ');
+    
+    let mentionedCompanies: string[];
+    if (citationContent) {
+      // Analyze citation-specific content
+      mentionedCompanies = detectMentionedCompanies(
+        citationContent,
+        brandName,
+        competitors
+      );
+    } else {
+      // Fall back to entire response text if citation has no content
+      mentionedCompanies = detectMentionedCompanies(
+        responseText,
+        brandName,
+        competitors
+      );
+    }
 
     return {
       ...citation,

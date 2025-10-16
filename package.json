@@ -14,7 +14,11 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:drop": "drizzle-kit drop"
+    "db:drop": "drizzle-kit drop",
+    "langfuse:start": "docker compose -f docker-compose.langfuse.yml up -d",
+    "langfuse:stop": "docker compose -f docker-compose.langfuse.yml down",
+    "langfuse:logs": "docker compose -f docker-compose.langfuse.yml logs -f",
+    "dev:with-langfuse": "npm run langfuse:start && npm run dev"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.23",
@@ -40,6 +44,7 @@
     "drizzle-kit": "^0.31.5",
     "drizzle-orm": "^0.44.2",
     "eventsource-parser": "^3.0.3",
+    "langfuse": "^3.30.0",
     "lucide-react": "^0.525.0",
     "next": "^15.5.4",
     "node-fetch": "^2.7.0",

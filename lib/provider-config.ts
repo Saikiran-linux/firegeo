@@ -137,7 +137,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         supportsWebSearch: false,
       },
     ],
-    defaultModel: 'gpt-5-2025-08-07',
+    defaultModel: 'gpt-5-mini-2025-08-07', // Using mini for development cost reduction
     capabilities: {
       webSearch: true, // Via responses API with specific models
       functionCalling: true,
@@ -163,6 +163,22 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
     enabled: PROVIDER_ENABLED_CONFIG.anthropic,
     models: [
       {
+        id: 'claude-haiku-4-5-20251001',
+        name: 'Claude Haiku 4.5',
+        maxTokens: 200000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
+        id: 'claude-sonnet-4-5-20250929',
+        name: 'Claude Sonnet 4.5',
+        maxTokens: 200000,
+        supportsFunctionCalling: true,
+        supportsStructuredOutput: true,
+        supportsWebSearch: true,
+      },
+      {
         id: 'claude-4-sonnet-20250514',
         name: 'Claude 4 Sonnet',
         maxTokens: 200000,
@@ -187,7 +203,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         supportsWebSearch: false,
       },
     ],
-    defaultModel: 'claude-4-sonnet-20250514',
+    defaultModel: 'claude-haiku-4-5-20251001',
     capabilities: {
       webSearch: true,
       functionCalling: true,
@@ -291,7 +307,7 @@ export const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
         supportsWebSearch: true,
       },
     ],
-    defaultModel: 'sonar-pro',
+    defaultModel: 'sonar', // Using sonar for development cost reduction
     capabilities: {
       webSearch: true, // All models have built-in web search
       functionCalling: false,

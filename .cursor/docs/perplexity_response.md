@@ -1,343 +1,150 @@
-# OpenAI Compatibility
 
-> Use Perplexity’s Sonar API with OpenAI’s client libraries for seamless integration.
+# Perplexity Provider
 
-## OpenAI compatibility at a glance
+The [Perplexity](https://sonar.perplexity.ai) provider offers access to Sonar API - a language model that uniquely combines real-time web search with natural language processing. Each response is grounded in current web data and includes detailed citations, making it ideal for research, fact-checking, and obtaining up-to-date information.
 
-Perplexity's Sonar API was designed with OpenAI compatibility in mind, matching the Chat Completions API interface. You can seamlessly use your existing OpenAI client libraries by simply changing the base URL and providing your Perplexity API key.
+API keys can be obtained from the [Perplexity Platform](https://docs.perplexity.ai).
 
-<Tip>
-  Keep using your existing OpenAI SDKs to get started fast; switch to our [native SDKs](/guides/perplexity-sdk) later as needed.
-</Tip>
+## Setup
 
-## Configuring OpenAI SDKs to call Sonar
+The Perplexity provider is available via the `@ai-sdk/perplexity` module. You can install it with:
 
-To start using Sonar with OpenAI's client libraries, pass your Perplexity API key and change the base\_url to `https://api.perplexity.ai`:
-
-<Tabs>
-  <Tab title="Python">
-    ```python  theme={null}
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key="YOUR_API_KEY",
-        base_url="https://api.perplexity.ai"
-    )
-
-    resp = client.chat.completions.create(
-        model="sonar-pro",
-        messages=[
-            {"role": "user", "content": "Hello!"}
-        ]
-    )
-    print(resp.choices[0].message.content)
-    ```
+<Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
+  <Tab>
+    <Snippet text="pnpm add @ai-sdk/perplexity" dark />
+  </Tab>
+  <Tab>
+    <Snippet text="npm install @ai-sdk/perplexity" dark />
+  </Tab>
+  <Tab>
+    <Snippet text="yarn add @ai-sdk/perplexity" dark />
   </Tab>
 
-  <Tab title="TypeScript">
-    ```typescript  theme={null}
-    import OpenAI from 'openai';
-
-    const client = new OpenAI({
-      apiKey: "YOUR_API_KEY",
-      baseURL: "https://api.perplexity.ai"
-    });
-
-    const resp = await client.chat.completions.create({
-      model: "sonar-pro",
-      messages: [{ role: "user", content: "Hello!" }]
-    });
-    console.log(resp.choices[0].message.content);
-    ```
+  <Tab>
+    <Snippet text="bun add @ai-sdk/perplexity" dark />
   </Tab>
 </Tabs>
 
-<Check>
-  Your responses will match OpenAI's format exactly. See the [response structure](#response-structure) section below for complete field details.
-</Check>
+## Provider Instance
 
-## API compatibility
+You can import the default provider instance `perplexity` from `@ai-sdk/perplexity`:
 
-### Standard OpenAI parameters
+```ts
+import { perplexity } from '@ai-sdk/perplexity';
+```
 
-These parameters work exactly the same as OpenAI's API:
+For custom configuration, you can import `createPerplexity` and create a provider instance with your settings:
 
-* `model` - Model name (use Perplexity model names)
-* `messages` - Chat messages array
-* `temperature` - Sampling temperature (0-2)
-* `max_tokens` - Maximum tokens in response
-* `top_p` - Nucleus sampling parameter
-* `frequency_penalty` - Frequency penalty (-2.0 to 2.0)
-* `presence_penalty` - Presence penalty (-2.0 to 2.0)
-* `stream` - Enable streaming responses
+```ts
+import { createPerplexity } from '@ai-sdk/perplexity';
 
-### Perplexity-specific parameters
+const perplexity = createPerplexity({
+  apiKey: process.env.PERPLEXITY_API_KEY ?? '',
+});
+```
 
-These Perplexity-specific parameters are also included:
+You can use the following optional settings to customize the Perplexity provider instance:
 
-* `search_domain_filter` - Limit or exclude specific domains
-* `search_recency_filter` - Filter by content recency
-* `return_images` - Include image URLs in response
-* `return_related_questions` - Include related questions
-* `search_mode` - "web" (default) or "academic" mode selector.
+- **baseURL** _string_
 
-<Info>See [API Reference](/api-reference) for parameter details and models.</Info>
+  Use a different URL prefix for API calls.
+  The default prefix is `https://api.perplexity.ai`.
 
-## Examples with OpenAI's client libraries
+- **apiKey** _string_
 
-### Basic Usage
+  API key that is being sent using the `Authorization` header. It defaults to
+  the `PERPLEXITY_API_KEY` environment variable.
 
-Start with these simple examples to make your first API calls:
+- **headers** _Record&lt;string,string&gt;_
 
-<Tabs>
-  <Tab title="Python">
-    ```python  theme={null}
-    from openai import OpenAI
+  Custom headers to include in the requests.
 
-    client = OpenAI(
-        api_key="YOUR_API_KEY",
-        base_url="https://api.perplexity.ai"
-    )
+- **fetch** _(input: RequestInfo, init?: RequestInit) => Promise&lt;Response&gt;_
 
-    response = client.chat.completions.create(
-        model="sonar-pro",
-        messages=[
-            {"role": "user", "content": "What are the latest developments in AI?"}
-        ]
-    )
+  Custom [fetch](https://developer.mozilla.org/en-US/docs/Web/API/fetch) implementation.
 
-    print(response.choices[0].message.content)
-    ```
-  </Tab>
+## Language Models
 
-  <Tab title="TypeScript">
-    ```typescript  theme={null}
-    import OpenAI from 'openai';
+You can create Perplexity models using a provider instance:
 
-    const client = new OpenAI({
-        apiKey: "YOUR_API_KEY",
-        baseURL: "https://api.perplexity.ai"
-    });
+```ts
+import { perplexity } from '@ai-sdk/perplexity';
+import { generateText } from 'ai';
 
-    const response = await client.chat.completions.create({
-        model: "sonar-pro",
-        messages: [
-            { role: "user", content: "What are the latest developments in AI?" }
-        ]
-    });
+const { text } = await generateText({
+  model: perplexity('sonar-pro'),
+  prompt: 'What are the latest developments in quantum computing?',
+});
+```
 
-    console.log(response.choices[0].message.content);
-    ```
-  </Tab>
-</Tabs>
+### Sources
 
-### Advanced Examples
+Websites that have been used to generate the response are included in the `sources` property of the result:
 
-For more control over search behavior and response generation:
+```ts
+import { perplexity } from '@ai-sdk/perplexity';
+import { generateText } from 'ai';
 
-<Tabs>
-  <Tab title="Python">
-    <CodeGroup>
-      ```python Search Filtering theme={null}
-      from openai import OpenAI
+const { text, sources } = await generateText({
+  model: perplexity('sonar-pro'),
+  prompt: 'What are the latest developments in quantum computing?',
+});
 
-      client = OpenAI(
-          api_key="YOUR_API_KEY",
-          base_url="https://api.perplexity.ai"
-      )
+console.log(sources);
+```
 
-      response = client.chat.completions.create(
-          model="sonar-pro",
-          messages=[
-              {"role": "user", "content": "Latest climate research findings"}
-          ],
-          extra_body={
-              "search_domain_filter": ["nature.com", "science.org"],
-              "search_recency_filter": "month"
-          }
-      )
+### Provider Options & Metadata
 
-      print(response.choices[0].message.content)
-      print(f"Sources: {len(response.search_results)} articles found")
-      ```
+The Perplexity provider includes additional metadata in the response through `providerMetadata`.
+Additional configuration options are available through `providerOptions`.
 
-      ```python Full Configuration theme={null}
-      from openai import OpenAI
+```ts
+const result = await generateText({
+  model: perplexity('sonar-pro'),
+  prompt: 'What are the latest developments in quantum computing?',
+  providerOptions: {
+    perplexity: {
+      return_images: true, // Enable image responses (Tier-2 Perplexity users only)
+    },
+  },
+});
 
-      client = OpenAI(
-          api_key="YOUR_API_KEY",
-          base_url="https://api.perplexity.ai"
-      )
+console.log(result.providerMetadata);
+// Example output:
+// {
+//   perplexity: {
+//     usage: { citationTokens: 5286, numSearchQueries: 1 },
+//     images: [
+//       { imageUrl: "https://example.com/image1.jpg", originUrl: "https://elsewhere.com/page1", height: 1280, width: 720 },
+//       { imageUrl: "https://example.com/image2.jpg", originUrl: "https://elsewhere.com/page2", height: 1280, width: 720 }
+//     ]
+//   },
+// }
+```
 
-      response = client.chat.completions.create(
-          model="sonar-pro",
-          messages=[
-              {"role": "system", "content": "Be precise and concise."},
-              {"role": "user", "content": "How many stars are in our galaxy?"}
-          ],
-          temperature=0.2,
-          max_tokens=1000,
-          extra_body={
-              "search_mode": "web",
-              "search_domain_filter": ["nasa.gov", "space.com"],
-              "return_related_questions": True
-          }
-      )
+The metadata includes:
 
-      print(response.choices[0].message.content)
-      for result in response.search_results:
-          print(f"- {result['title']}: {result['url']}")
-      ```
-    </CodeGroup>
-  </Tab>
+- `usage`: Object containing `citationTokens` and `numSearchQueries` metrics
+- `images`: Array of image URLs when `return_images` is enabled (Tier-2 users only)
 
-  <Tab title="TypeScript">
-    <CodeGroup>
-      ```typescript Search Filtering theme={null}
-      import OpenAI from 'openai';
+You can enable image responses by setting `return_images: true` in the provider options. This feature is only available to Perplexity Tier-2 users and above.
 
-      const client = new OpenAI({
-          apiKey: "YOUR_API_KEY",
-          baseURL: "https://api.perplexity.ai"
-      });
+<Note>
+  For more details about Perplexity's capabilities, see the [Perplexity chat
+  completion docs](https://docs.perplexity.ai/api-reference/chat-completions).
+</Note>
 
-      const response = await client.chat.completions.create({
-          model: "sonar-pro",
-          messages: [
-              { role: "user", content: "Latest climate research findings" }
-          ],
-          // TypeScript SDK: Use direct parameters (not extra_body)
-          search_domain_filter: ["nature.com", "science.org"],
-          search_recency_filter: "month"
-      });
+## Model Capabilities
 
-      console.log(response.choices[0].message.content);
-      console.log(`Sources: ${response.search_results.length} articles found`);
-      ```
+| Model                 | Image Input         | Object Generation   | Tool Usage          | Tool Streaming      |
+| --------------------- | ------------------- | ------------------- | ------------------- | ------------------- |
+| `sonar-deep-research` | <Cross size={18} /> | <Check size={18} /> | <Cross size={18} /> | <Cross size={18} /> |
+| `sonar-reasoning-pro` | <Check size={18} /> | <Check size={18} /> | <Cross size={18} /> | <Cross size={18} /> |
+| `sonar-reasoning`     | <Check size={18} /> | <Check size={18} /> | <Cross size={18} /> | <Cross size={18} /> |
+| `sonar-pro`           | <Check size={18} /> | <Check size={18} /> | <Cross size={18} /> | <Cross size={18} /> |
+| `sonar`               | <Check size={18} /> | <Check size={18} /> | <Cross size={18} /> | <Cross size={18} /> |
 
-      ```typescript Full Configuration theme={null}
-      import OpenAI from 'openai';
-
-      const client = new OpenAI({
-          apiKey: "YOUR_API_KEY",
-          baseURL: "https://api.perplexity.ai"
-      });
-
-      const response = await client.chat.completions.create({
-          model: "sonar-pro",
-          messages: [
-              { role: "system", content: "Be precise and concise." },
-              { role: "user", content: "How many stars are in our galaxy?" }
-          ],
-          temperature: 0.2,
-          max_tokens: 1000,
-          search_mode: "web",
-          search_domain_filter: ["nasa.gov", "space.com"],
-          return_related_questions: true
-      });
-
-      console.log(response.choices[0].message.content);
-      response.search_results.forEach(result => {
-          console.log(`- ${result.title}: ${result.url}`);
-      });
-      ```
-    </CodeGroup>
-  </Tab>
-</Tabs>
-
-## Response structure
-
-Perplexity API responses include both standard OpenAI fields and additional search metadata:
-
-### Standard OpenAI Fields
-
-* `choices[0].message.content` - The AI-generated response
-* `model` - The model name used
-* `usage` - Token consumption details
-* `id`, `created`, `object` - Standard response metadata
-
-### Perplexity-Specific Fields
-
-* `search_results` - Array of web sources with titles, URLs, and dates
-* `usage.search_context_size` - Search context setting used
-
-<Tabs>
-  <Tab title="Python">
-    ```python  theme={null}
-    # Access the main response
-    content = response.choices[0].message.content
-    print(content)
-
-    # Access search sources
-    for result in response.search_results:
-        print(f"Source: {result['title']}")
-        print(f"URL: {result['url']}")
-        print(f"Date: {result['date']}")
-        print("---")
-
-    # Check token usage
-    print(f"Tokens used: {response.usage.total_tokens}")
-    ```
-  </Tab>
-
-  <Tab title="TypeScript">
-    ```typescript  theme={null}
-    // Access the main response
-    const content = response.choices[0].message.content;
-    console.log(content);
-
-    // Access search sources
-    response.search_results.forEach(result => {
-        console.log(`Source: ${result.title}`);
-        console.log(`URL: ${result.url}`);
-        console.log(`Date: ${result.date}`);
-        console.log("---");
-    });
-
-    // Check token usage
-    console.log(`Tokens used: ${response.usage.total_tokens}`);
-    ```
-  </Tab>
-</Tabs>
-
-<Info>
-  Search results are returned even when streaming is enabled, but they arrive in the final chunk of the stream. See the [Streaming Guide](/guides/streaming-responses) for details.
-</Info>
-
-## Unsupported and notable differences
-
-While compatibility is high, note the following differences from OpenAI:
-
-* **Model names**: Use Perplexity models like `sonar-pro`, `sonar-reasoning`.
-* **Search controls**: Perplexity adds web/academic search parameters via `extra_body` (Python) or root fields (TypeScript) as shown above.
-
-<Warning>
-  If you previously used OpenAI-only fields that aren't applicable to Perplexity search controls, remove or ignore them. Check the API Reference for the current list of supported fields.
-</Warning>
-
-## Technical notes
-
-* **Error format**: Same as OpenAI's API for compatibility
-* **Rate limiting**: Apply standard rate limiting practices
-* **Model names**: Use Perplexity model names (`sonar-pro`, `sonar-reasoning`, etc.)
-* **Authentication**: Use `Bearer` token format in Authorization header
-
-## Next steps
-
-<CardGroup cols={2}>
-  <Card title="Explore Models" icon="brain" href="/getting-started/models">
-    Browse available Sonar models and their capabilities.
-  </Card>
-
-  <Card title="Search Controls" icon="magnifying-glass" href="/guides/search-control-guide">
-    Learn to fine-tune search behavior with filters and parameters.
-  </Card>
-
-  <Card title="Streaming Guide" icon="play" href="/guides/streaming-responses">
-    Implement real-time streaming responses in your application.
-  </Card>
-
-  <Card title="API Reference" icon="code" href="/api-reference">
-    View complete endpoint documentation and parameter details.
-  </Card>
-</CardGroup>
+<Note>
+  Please see the [Perplexity docs](https://docs.perplexity.ai) for detailed API
+  documentation and the latest updates.
+</Note>

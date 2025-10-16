@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # Langfuse PostgreSQL Database
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: langfuse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse_password
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Use 5433 to avoid conflicts with main app DB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching (optional but recommended)
+  langfuse-redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    restart: unless-stopped
+    volumes:
+      - langfuse-redis-data:/data
+    ports:
+      - "6380:6379"  # Use 6380 to avoid conflicts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Langfuse Web Application
+  langfuse-web:
+    image: langfuse/langfuse:latest
+    container_name: langfuse-web
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql://langfuse:langfuse_password@langfuse-db:5432/langfuse
+      
+      # Redis Configuration (optional)
+      REDIS_CONNECTION_STRING: redis://langfuse-redis:6379
+      
+      # NextAuth Configuration
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-changeme-generate-a-secure-secret-key-here}
+      
+      # Salt for API keys
+      SALT: ${LANGFUSE_SALT:-changeme-generate-a-secure-salt-here}
+      
+      # Telemetry (set to false for privacy)
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-true}
+      
+      # Langfuse Host (used by SDK)
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      
+      # Optional: Enable additional features
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  langfuse-postgres-data:
+    driver: local
+  langfuse-redis-data:
+    driver: local
+
+networks:
+  default:
+    name: langfuse-network
+
+
+
+

@@ -7,6 +7,7 @@ import { detectBrandMention, detectMultipleBrands, BrandDetectionOptions } from 
 import { getBrandDetectionOptions } from './brand-detection-config';
 import { MAX_COMPETITORS } from './perplexity';
 import { extractCitationsFromResponse, enhanceCitationsWithMentions, generateSampleCitations } from './citation-utils';
+import { isLangfuseEnabled, traceGenerateText, traceGenerateObject, withSpan } from './langfuse-client';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
@@ -147,12 +148,18 @@ function buildCategoryFallbackPrompt(category: BrandPrompt['category'], company:
   }
 }
 
-export async function identifyCompetitors(company: CompanyInput, progressCallback?: ProgressCallback): Promise<string[]> {
+export async function identifyCompetitors(company: CompanyInput, progressCallback?: ProgressCallback, trace?: any): Promise<string[]> {
   logger.info({
     context: 'identifyCompetitors',
     company: company.name,
     industry: company.industry,
   }, '🔍 Fallback competitor identification (used when web search fails)');
+  
+  // Create Langfuse span if tracing is enabled
+  const langfuseEnabled = isLangfuseEnabled();
+  if (langfuseEnabled && trace) {
+    logger.info('Langfuse tracing enabled for identifyCompetitors');
+  }
   
   try {
     // PRIORITY 1: Try to use Perplexity for research (has built-in web search)
@@ -200,11 +207,26 @@ Return ONLY a numbered list of 6-9 competitor company names, one per line. Forma
 
 Do not include explanations, just the numbered list of competitor names.`;
 
-          const { text } = await generateText({
+          const generateFn = () => generateText({
             model: perplexityModel,
             prompt: researchPrompt,
             temperature: 0.3,
           });
+
+          const { text } = trace && langfuseEnabled
+            ? await traceGenerateText(trace, 'Identify Competitors (Perplexity)', generateFn, {
+                provider: {
+                  provider: 'Perplexity',
+                  model: 'sonar-pro',
+                  temperature: 0.3,
+                },
+                brand: {
+                  brandName: company.name,
+                  feature: 'competitor-identification',
+                },
+                prompt: researchPrompt,
+              })
+            : await generateFn();
 
           // Parse the text response to extract competitor names
           const lines = text.split('\n').filter(line => line.trim());
@@ -299,12 +321,28 @@ IMPORTANT:
 - Aim for 6-12 competitors total
 - Do NOT include general retailers or platforms that just sell/distribute products`;
 
-    const { object } = await generateObject({
+    const generateObjFn = () => generateObject({
       model,
       schema: CompetitorSchema,
       prompt,
       temperature: 0.3,
     });
+
+    const { object } = trace && langfuseEnabled
+      ? await traceGenerateObject(trace, `Identify Competitors (${provider.name})`, generateObjFn, {
+          provider: {
+            provider: provider.name,
+            model: provider.defaultModel,
+            temperature: 0.3,
+          },
+          brand: {
+            brandName: company.name,
+            feature: 'competitor-identification',
+          },
+          prompt,
+          schema: 'CompetitorSchema',
+        })
+      : await generateObjFn();
 
     // Extract competitor names and filter for direct competitors
     const isRetailOrPlatform = company.industry?.toLowerCase().includes('marketplace') || 
@@ -415,8 +453,9 @@ async function detectIndustryFromContent(company: Company): Promise<string> {
   return 'technology';
 }
 
-export async function generatePromptsForCompany(company: Company, competitors: string[]): Promise<BrandPrompt[]> {
+export async function generatePromptsForCompany(company: Company, competitors: string[], trace?: any): Promise<BrandPrompt[]> {
   const isDebug = process.env.DEBUG_PROMPT_GEN === 'true';
+  const langfuseEnabled = isLangfuseEnabled();
   
   logger.info({ company: company.name, competitorCount: competitors.length }, 'Starting prompt generation');
   
@@ -426,31 +465,48 @@ export async function generatePromptsForCompany(company: Company, competitors: s
   
   const promptContext = buildPromptGenerationPrompt(company, competitors);
 
-  const anthropicModel = getProviderModel('anthropic', 'claude-4-sonnet-20250514');
+  const anthropicModel = getProviderModel('anthropic', 'claude-sonnet-4-5-20250929');
 
   if (isDebug) {
-    logger.debug({ provider: 'Anthropic', model: 'Claude 4 Sonnet', configured: !!anthropicModel }, 'Model configuration');
+    logger.debug({ provider: 'Anthropic', model: 'Claude Sonnet 4.5', configured: !!anthropicModel }, 'Model configuration');
   }
 
   if (!anthropicModel) {
-    logger.warn('Claude 4 Sonnet not configured, falling back to heuristic prompts');
+    logger.warn('Claude Sonnet 4.5 not configured, falling back to heuristic prompts');
     const heuristicPrompts = getHeuristicPrompts(company, competitors);
     logger.info({ promptCount: heuristicPrompts.length }, 'Generated heuristic prompts');
     return heuristicPrompts;
   }
 
-  logger.info('Starting prompt generation with Claude 4 Sonnet');
+  logger.info('Starting prompt generation with Claude Sonnet 4.5');
 
   try {
     const startTime = Date.now();
     
-    const { object } = await generateObject({
+    const generateObjFn = () => generateObject({
       model: anthropicModel,
       schema: PromptGenerationSchema,
       temperature: 0.5,
       prompt: promptContext,
       maxRetries: 3,
     });
+
+    const { object } = trace && langfuseEnabled
+      ? await traceGenerateObject(trace, 'Generate Prompts (Claude Sonnet 4.5)', generateObjFn, {
+          provider: {
+            provider: 'Anthropic',
+            model: 'claude-sonnet-4-5-20250929',
+            temperature: 0.5,
+          },
+          brand: {
+            brandName: company.name,
+            competitors,
+            feature: 'prompt-generation',
+          },
+          prompt: promptContext,
+          schema: 'PromptGenerationSchema',
+        })
+      : await generateObjFn();
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
@@ -595,8 +651,10 @@ export async function analyzePromptWithProvider(
   brandName: string,
   competitors: string[],
   useMockMode: boolean = false,
-  useWebSearch: boolean = true
+  useWebSearch: boolean = true,
+  trace?: any
 ): Promise<AIResponse> {
+  const langfuseEnabled = isLangfuseEnabled();
   // Mock mode for demo/testing without API keys
   if (useMockMode || provider === 'Mock') {
     return generateMockResponse(prompt, provider, brandName, competitors);
@@ -613,11 +671,6 @@ export async function analyzePromptWithProvider(
     // Return null to indicate this provider should be skipped
     return null as any;
   }
-  
-  console.log(`${provider} model obtained successfully: ${typeof model}${useWebSearch ? ' with web search enabled' : ''}`);
-  if (normalizedProvider === 'google') {
-    console.log('Google model details:', model);
-  }
 
   const systemPrompt = `You are an AI assistant analyzing brand visibility and rankings.
 When responding to prompts about tools, platforms, or services:
@@ -630,8 +683,6 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
 
   try {
     // First, get the response
-    console.log(`Calling ${provider} with prompt: "${prompt.substring(0, 50)}..."${useWebSearch ? ' with web search' : ''}`);
-    
     // Enhance prompt for web search
     const enhancedPrompt = useWebSearch 
       ? `${prompt}\n\nPlease search for current, factual information to answer this question. Focus on recent data and real user opinions.`
@@ -641,12 +692,9 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
     const tools: any = {};
     
     if (useWebSearch) {
-      console.log(`[WebSearch] Configuring web search for ${provider}...`);
-      
       try {
         switch (normalizedProvider) {
           case 'anthropic': {
-            // Use Anthropic's webSearch_20250305 tool
             const { anthropic } = await import('@ai-sdk/anthropic');
             tools.web_search = anthropic.tools.webSearch_20250305({
               maxUses: 5,
@@ -655,40 +703,32 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
                 country: 'US',
               }
             });
-            console.log(`[WebSearch] ✅ Anthropic webSearch_20250305 configured`);
             break;
           }
           
           case 'google': {
-            // Use Google's googleSearch tool
             const { google } = await import('@ai-sdk/google');
             tools.google_search = google.tools.googleSearch({});
-            console.log(`[WebSearch] ✅ Google googleSearch tool configured`);
             break;
           }
           
           case 'openai': {
-            // Use OpenAI's webSearch tool (for GPT-5 and compatible models)
             const { openai } = await import('@ai-sdk/openai');
             tools.web_search = openai.tools.webSearch({
               searchContextSize: 'high',
             });
-            console.log(`[WebSearch] ✅ OpenAI webSearch tool configured`);
             break;
           }
           
           case 'perplexity':
-            // Perplexity has built-in web search, no tool needed
-            console.log(`[WebSearch] ✅ Perplexity has built-in web search`);
             break;
         }
       } catch (toolError) {
-        console.warn(`[WebSearch] ⚠️ Failed to configure ${provider} web search tool:`, toolError);
-        // Continue without web search tool
+        console.warn(`Failed to configure ${provider} web search:`, toolError);
       }
     }
     
-    const result = await generateText({
+    const generateFn = () => generateText({
       model,
       system: systemPrompt,
       prompt: enhancedPrompt,
@@ -696,12 +736,27 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
       ...(Object.keys(tools).length > 0 && { tools }),
       ...(useWebSearch && { stopWhen: stepCountIs(10) }), // Allow multi-step tool calling
     });
+
+    const result = trace && langfuseEnabled
+      ? await traceGenerateText(trace, `Analyze Prompt (${provider})`, generateFn, {
+          provider: {
+            provider,
+            model: typeof model === 'object' ? (model as any).modelId || normalizedProvider : normalizedProvider,
+            temperature: 0.7,
+          },
+          brand: {
+            brandName,
+            competitors,
+            useWebSearch,
+            feature: 'brand-analysis',
+          },
+          prompt: enhancedPrompt,
+        })
+      : await generateFn();
     
     const text = result.text;
     const sources = result.sources || []; // AI SDK standard sources property
     const providerMetadata = (result as any).providerMetadata; // Provider-specific metadata
-    
-    console.log(`${provider} response length: ${text.length}, first 100 chars: "${text.substring(0, 100)}"`);
     
     if (!text || text.length === 0) {
       console.error(`${provider} returned empty response for prompt: "${prompt}"`);
@@ -712,9 +767,6 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
     let citations: Citation[] = [];
     try {
       if (useWebSearch) {
-        console.log(`[Citations] ${provider} sources found: ${sources.length}`);
-        console.log(`[Citations] ${provider} has providerMetadata:`, !!providerMetadata);
-        
         // Extract from AI SDK sources (standard format)
         if (sources.length > 0) {
           sources.forEach((source: any, index: number) => {
@@ -724,17 +776,15 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
                 title: source.title || '',
                 source: source.url ? new URL(source.url).hostname : '',
                 position: index,
-                mentionedCompanies: [] // Will be populated below
+                mentionedCompanies: []
               });
             }
           });
-          console.log(`[Citations] Extracted ${citations.length} citations from sources`);
         }
         
         // For Google, also check grounding metadata for additional info
         if (normalizedProvider === 'google' && providerMetadata?.google?.groundingMetadata) {
           const groundingMetadata = providerMetadata.google.groundingMetadata;
-          console.log(`[Citations] Google grounding metadata found with ${groundingMetadata.groundingChunks?.length || 0} chunks`);
           
           if (groundingMetadata.groundingChunks && citations.length === 0) {
             // Extract from grounding chunks if sources didn't have them
@@ -755,16 +805,13 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
         // Enhance citations with company mentions
         if (citations.length > 0) {
           citations = enhanceCitationsWithMentions(citations, text, brandName, competitors);
-          console.log(`✅ [Citations] ${provider} found ${citations.length} REAL citations`);
         } else {
-          console.log(`⚠️ [Citations] ${provider} returned 0 citations - using sample data`);
           citations = generateSampleCitations(brandName, competitors, provider);
         }
       }
     } catch (citationError) {
-      console.error(`❌ [Citations] Error extracting from ${provider}:`, citationError);
+      console.error(`Error extracting citations:`, citationError);
       if (useWebSearch) {
-        console.log(`[Citations] Using sample data as fallback`);
         citations = generateSampleCitations(brandName, competitors, provider);
       }
     }
@@ -807,13 +854,30 @@ Examples of mentions to catch:
         ? getProviderModel('openai', 'gpt-5-mini-2025-08-07') || model
         : model;
       
-      const result = await generateObject({
+      const generateObjFn = () => generateObject({
         model: structuredModel,
         schema: RankingSchema,
         prompt: analysisPrompt,
         temperature: 0.1, // Lower temperature for more consistent output
         maxRetries: 3, // Increase retries
       });
+
+      const result = trace && langfuseEnabled
+        ? await traceGenerateObject(trace, `Structured Analysis (${provider})`, generateObjFn, {
+            provider: {
+              provider,
+              model: typeof structuredModel === 'object' ? (structuredModel as any).modelId || 'structured-model' : 'structured-model',
+              temperature: 0.1,
+            },
+            brand: {
+              brandName,
+              competitors,
+              feature: 'structured-analysis',
+            },
+            prompt: analysisPrompt,
+            schema: 'RankingSchema',
+          })
+        : await generateObjFn();
       object = result.object;
     } catch (error) {
       console.error(`Error generating structured object with ${provider}:`, (error as any).message);
@@ -1023,33 +1087,12 @@ Return a simple analysis:
       competitors.includes(c) && c !== brandName
     );
     
-    // Log detection details for debugging
-    if (brandDetectionResult.mentioned && !object.analysis.brandMentioned) {
-      console.log(`Enhanced detection found brand "${brandName}" in response from ${provider}:`, 
-        brandDetectionResult.matches.map(m => ({
-          text: m.text,
-          confidence: m.confidence
-        }))
-      );
-    }
-
     // Get the proper display name for the provider
     const providerDisplayName = provider === 'openai' ? 'OpenAI' :
                                provider === 'anthropic' ? 'Anthropic' :
                                provider === 'google' ? 'Google' :
                                provider === 'perplexity' ? 'Perplexity' :
                                provider; // fallback to original
-    
-    // Debug log for Google responses
-    if (provider === 'google' || provider === 'Google') {
-      console.log('Google response generated:', {
-        originalProvider: provider,
-        displayName: providerDisplayName,
-        prompt: prompt.substring(0, 50),
-        responseLength: text.length,
-        brandMentioned
-      });
-    }
 
     return {
       provider: providerDisplayName,

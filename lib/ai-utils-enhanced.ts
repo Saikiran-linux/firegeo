@@ -4,6 +4,7 @@ import { Company, BrandPrompt, AIResponse, CompanyRanking, CompetitorRanking, Pr
 import { getProviderModel, normalizeProviderName, isProviderConfigured, getProviderConfig, PROVIDER_CONFIGS } from './provider-config';
 import { analyzeWithAnthropicWebSearch } from './anthropic-web-search';
 import { extractCitationsFromResponse, enhanceCitationsWithMentions, generateSampleCitations } from './citation-utils';
+import { isLangfuseEnabled, traceGenerateText, traceGenerateObject } from './langfuse-client';
 
 const RankingSchema = z.object({
   rankings: z.array(z.object({
@@ -28,8 +29,10 @@ export async function analyzePromptWithProviderEnhanced(
   brandName: string,
   competitors: string[],
   useMockMode: boolean = false,
-  useWebSearch: boolean = true // New parameter
+  useWebSearch: boolean = true, // New parameter
+  trace?: any // Langfuse trace parameter
 ): Promise<AIResponse> {
+  const langfuseEnabled = isLangfuseEnabled();
   // Mock mode for demo/testing without API keys
   if (useMockMode || provider === 'Mock') {
     return generateMockResponse(prompt, provider, brandName, competitors);
@@ -51,8 +54,6 @@ export async function analyzePromptWithProviderEnhanced(
     console.warn(`Failed to get model for ${provider}`);
     return null as any;
   }
-  
-  console.log(`${provider} model obtained with web search: ${useWebSearch}`);
 
   const systemPrompt = `You are an AI assistant analyzing brand visibility and rankings.
 When responding to prompts about tools, platforms, or services:
@@ -73,8 +74,6 @@ When responding to prompts about tools, platforms, or services:
     const tools: any = {};
     
     if (useWebSearch) {
-      console.log(`[WebSearch Enhanced] Configuring web search for ${provider}...`);
-      
       try {
         switch (normalizedProvider) {
           case 'anthropic': {
@@ -86,14 +85,12 @@ When responding to prompts about tools, platforms, or services:
                 country: 'US',
               }
             });
-            console.log(`[WebSearch Enhanced] ✅ Anthropic webSearch_20250305 configured`);
             break;
           }
           
           case 'google': {
             const { google } = await import('@ai-sdk/google');
             tools.google_search = google.tools.googleSearch({});
-            console.log(`[WebSearch Enhanced] ✅ Google googleSearch tool configured`);
             break;
           }
           
@@ -102,28 +99,49 @@ When responding to prompts about tools, platforms, or services:
             tools.web_search = openai.tools.webSearch({
               searchContextSize: 'high',
             });
-            console.log(`[WebSearch Enhanced] ✅ OpenAI webSearch tool configured`);
             break;
           }
           
           case 'perplexity':
-            console.log(`[WebSearch Enhanced] ✅ Perplexity has built-in web search`);
             break;
         }
       } catch (toolError) {
-        console.warn(`[WebSearch Enhanced] ⚠️ Failed to configure ${provider} tool:`, toolError);
+        console.warn(`Failed to configure ${provider} web search:`, toolError);
       }
     }
     
     // First, get the response with potential web search
-    const result = await generateText({
+    const generateFn = () => generateText({
       model,
       system: systemPrompt,
       prompt: enhancedPrompt,
       temperature: 0.7,
       ...(Object.keys(tools).length > 0 && { tools }),
       ...(useWebSearch && { stopWhen: stepCountIs(10) }),
+      maxRetries: 5, // Increase retries for rate limiting
+      experimental_providerMetadata: {
+        anthropic: {
+          cacheControl: { type: 'ephemeral' }, // Use prompt caching to reduce tokens
+        },
+      },
     });
+
+    const result = trace && langfuseEnabled
+      ? await traceGenerateText(trace, `${provider} - Main Analysis${useWebSearch ? ' (Web Search)' : ''}`, generateFn, {
+          provider: {
+            provider,
+            model: typeof model === 'object' ? (model as any).modelId || normalizedProvider : normalizedProvider,
+            temperature: 0.7,
+          },
+          brand: {
+            brandName,
+            competitors,
+            useWebSearch,
+            feature: 'brand-analysis-enhanced',
+          },
+          prompt: enhancedPrompt,
+        })
+      : await generateFn();
     
     const text = result.text;
     const sources = result.sources || [];
@@ -133,8 +151,6 @@ When responding to prompts about tools, platforms, or services:
     let citations: Citation[] = [];
     try {
       if (useWebSearch) {
-        console.log(`[Citations Enhanced] ${provider} sources found: ${sources.length}`);
-        
         // Extract from AI SDK sources
         if (sources.length > 0) {
           sources.forEach((source: any, index: number) => {
@@ -148,7 +164,6 @@ When responding to prompts about tools, platforms, or services:
               });
             }
           });
-          console.log(`[Citations Enhanced] Extracted ${citations.length} citations from sources`);
         }
         
         // For Google, check grounding metadata
@@ -172,14 +187,12 @@ When responding to prompts about tools, platforms, or services:
         // Enhance citations with company mentions
         if (citations.length > 0) {
           citations = enhanceCitationsWithMentions(citations, text, brandName, competitors);
-          console.log(`✅ [Citations Enhanced] ${provider} found ${citations.length} REAL citations`);
         } else {
-          console.log(`⚠️ [Citations Enhanced] ${provider} - using sample data`);
           citations = generateSampleCitations(brandName, competitors, provider);
         }
       }
     } catch (citationError) {
-      console.error(`❌ [Citations Enhanced] Error:`, citationError);
+      console.error(`Error extracting citations:`, citationError);
       if (useWebSearch) {
         citations = generateSampleCitations(brandName, competitors, provider);
       }
@@ -209,7 +222,7 @@ Be very thorough in detecting company names - they might appear in different con
         throw new Error('Analysis model not available');
       }
       
-      const result = await generateObject({
+      const generateObjFn = () => generateObject({
         model: analysisModel,
         system: 'You are an expert at analyzing text and extracting structured information about companies and rankings. Always respond with valid JSON that matches the required schema exactly.',
         prompt: analysisPrompt,
@@ -217,6 +230,23 @@ Be very thorough in detecting company names - they might appear in different con
         temperature: 0.1, // Lower temperature for consistency
         maxRetries: 3, // More retries
       });
+
+      const result = trace && langfuseEnabled
+        ? await traceGenerateObject(trace, `${provider} - Structured Analysis`, generateObjFn, {
+            provider: {
+              provider: 'OpenAI',
+              model: 'gpt-5-mini',
+              temperature: 0.1,
+            },
+            brand: {
+              brandName,
+              competitors,
+              feature: 'structured-analysis',
+            },
+            prompt: analysisPrompt,
+            schema: 'RankingSchema',
+          })
+        : await generateObjFn();
       object = result.object;
     } catch (error) {
       console.error('Structured analysis failed:', error);
@@ -347,7 +377,17 @@ Return ONLY the JSON object.`;
       timestamp: new Date(),
       citations: citations.length > 0 ? citations : undefined,
     };
-  } catch (error) {
+  } catch (error: any) {
+    // Check if it's a rate limit error
+    const isRateLimitError = error?.message?.includes('rate limit') || 
+                            error?.statusCode === 429 ||
+                            error?.cause?.statusCode === 429;
+    
+    if (isRateLimitError) {
+      const retryAfter = error?.responseHeaders?.['retry-after'] || 60;
+      await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+    }
+    
     console.error(`Error with ${provider}:`, error);
     throw error;
   }

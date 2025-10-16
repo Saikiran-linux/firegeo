@@ -280,6 +280,49 @@ PERPLEXITY_API_KEY=
 GOOGLE_GENERATIVE_AI_API_KEY=
 ```
 
+## AI Observability with Langfuse (Optional)
+
+Monitor all AI interactions, track costs, and debug responses across all providers.
+
+### Quick Setup
+
+```bash
+# 1. Start Langfuse (self-hosted via Docker)
+npm run langfuse:start
+
+# 2. Visit http://localhost:3001 and create account
+# 3. Create a project and copy API keys
+
+# 4. Add to .env.local:
+LANGFUSE_ENABLED=true
+LANGFUSE_URL=http://localhost:3001
+LANGFUSE_PUBLIC_KEY=pk-lf-your-key
+LANGFUSE_SECRET_KEY=sk-lf-your-key
+
+# 5. Start app and run analysis - traces appear in Langfuse!
+npm run dev
+```
+
+### What Gets Tracked
+
+- Every LLM call (OpenAI, Anthropic, Google, Perplexity)
+- Token usage and costs per provider
+- Web search usage and citations
+- Brand mentions and sentiment
+- Response latency
+- Full request/response data
+
+### Langfuse Scripts
+
+```bash
+npm run langfuse:start       # Start Langfuse containers
+npm run langfuse:stop        # Stop Langfuse
+npm run langfuse:logs        # View logs
+npm run dev:with-langfuse    # Start Langfuse + app together
+```
+
+📚 **Full Documentation**: See `LANGFUSE_SETUP.md` for complete setup guide
+
 ## Available Scripts
 
 ```bash
@@ -289,6 +332,8 @@ npm run start                # Start production server
 npm run db:push              # Push schema to database
 npm run db:studio            # Open Drizzle Studio
 npm run db:migrate           # Run migrations
+npm run langfuse:start       # Start Langfuse observability
+npm run langfuse:stop        # Stop Langfuse
 ```
 
 

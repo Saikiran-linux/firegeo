@@ -17,7 +17,6 @@ export async function saveCitations(
   citationList: Citation[]
 ): Promise<void> {
   if (!citationList || citationList.length === 0) {
-    console.log(`[saveCitations] No citations to save for provider ${provider}`);
     return;
   }
 
@@ -36,9 +35,8 @@ export async function saveCitations(
     }));
 
     await db.insert(citations).values(citationsToInsert);
-    console.log(`[saveCitations] Saved ${citationsToInsert.length} citations for provider ${provider}`);
   } catch (error) {
-    console.error(`[saveCitations] Error saving citations:`, error);
+    console.error(`Error saving citations:`, error);
     throw error;
   }
 }
@@ -51,7 +49,6 @@ export async function saveAggregatedSources(
   citationAnalysis: CitationAnalysis
 ): Promise<void> {
   if (!citationAnalysis || !citationAnalysis.topSources || citationAnalysis.topSources.length === 0) {
-    console.log(`[saveAggregatedSources] No sources to save for analysis ${analysisId}`);
     return;
   }
 
@@ -67,9 +64,8 @@ export async function saveAggregatedSources(
     }));
 
     await db.insert(citationSources).values(sourcesToInsert);
-    console.log(`[saveAggregatedSources] Saved ${sourcesToInsert.length} aggregated sources`);
   } catch (error) {
-    console.error(`[saveAggregatedSources] Error saving aggregated sources:`, error);
+    console.error(`Error saving aggregated sources:`, error);
     throw error;
   }
 }
@@ -85,10 +81,9 @@ export async function getCitationsByAnalysisId(analysisId: string): Promise<DBCi
       .where(eq(citations.analysisId, analysisId))
       .orderBy(desc(citations.createdAt));
 
-    console.log(`[getCitationsByAnalysisId] Found ${result.length} citations for analysis ${analysisId}`);
     return result;
   } catch (error) {
-    console.error(`[getCitationsByAnalysisId] Error fetching citations:`, error);
+    console.error(`Error fetching citations:`, error);
     throw error;
   }
 }
@@ -104,10 +99,9 @@ export async function getCitationSourcesByAnalysisId(analysisId: string): Promis
       .where(eq(citationSources.analysisId, analysisId))
       .orderBy(desc(citationSources.frequency));
 
-    console.log(`[getCitationSourcesByAnalysisId] Found ${result.length} sources for analysis ${analysisId}`);
     return result;
   } catch (error) {
-    console.error(`[getCitationSourcesByAnalysisId] Error fetching sources:`, error);
+    console.error(`Error fetching sources:`, error);
     throw error;
   }
 }
@@ -120,9 +114,8 @@ export async function deleteCitationsByAnalysisId(analysisId: string): Promise<v
   try {
     await db.delete(citations).where(eq(citations.analysisId, analysisId));
     await db.delete(citationSources).where(eq(citationSources.analysisId, analysisId));
-    console.log(`[deleteCitationsByAnalysisId] Deleted citations for analysis ${analysisId}`);
   } catch (error) {
-    console.error(`[deleteCitationsByAnalysisId] Error deleting citations:`, error);
+    console.error(`Error deleting citations:`, error);
     throw error;
   }
 }
@@ -142,7 +135,6 @@ export async function reconstructCitationAnalysis(
     ]);
 
     if (dbSources.length === 0) {
-      console.log(`[reconstructCitationAnalysis] No sources found for analysis ${analysisId}`);
       return null;
     }
 
@@ -267,7 +259,7 @@ export async function reconstructCitationAnalysis(
       providerBreakdown
     };
   } catch (error) {
-    console.error(`[reconstructCitationAnalysis] Error:`, error);
+    console.error(`Error reconstructing citation analysis:`, error);
     return null;
   }
 }
@@ -283,4 +275,7 @@ function extractDomain(url: string): string {
     return url;
   }
 }
+
+
+
 

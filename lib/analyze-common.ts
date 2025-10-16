@@ -1,8 +1,9 @@
 import { AIResponse, AnalysisProgressData, Company, PartialResultData, ProgressData, PromptGeneratedData, ScoringProgressData, SSEEvent, CitationAnalysis } from './types';
-import { generatePromptsForCompany, analyzePromptWithProvider, calculateBrandScores, analyzeCompetitors, identifyCompetitors, analyzeCompetitorsByProvider } from './ai-utils';
-import { analyzePromptWithProvider as analyzePromptWithProviderEnhanced } from './ai-utils-enhanced';
+import { generatePromptsForCompany, calculateBrandScores, analyzeCompetitors, identifyCompetitors, analyzeCompetitorsByProvider } from './ai-utils';
+import { analyzePromptWithProvider } from './ai-utils-enhanced';
 import { getConfiguredProviders } from './provider-config';
 import { analyzeCitations } from './citation-utils';
+import { createAnalysisTrace, updateTraceOutput, flushLangfuse, isLangfuseEnabled, withSpan, addEvent } from './langfuse-client';
 
 const verboseLogging = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
 
@@ -38,6 +39,27 @@ export async function performAnalysis({
   useWebSearch = true,
   sendEvent
 }: AnalysisConfig): Promise<AnalysisResult> {
+  // Create Langfuse parent trace for the entire analysis
+  const langfuseEnabled = isLangfuseEnabled();
+  const trace = langfuseEnabled ? createAnalysisTrace(
+    `Brand Analysis: ${company.name}`,
+    {
+      brandName: company.name,
+      useWebSearch,
+      feature: 'brand-monitoring',
+    }
+  ) : null;
+
+  if (trace) {
+    console.log('✅ Langfuse tracing enabled for analysis');
+    addEvent(trace, 'Analysis Started', {
+      company: company.name,
+      useWebSearch,
+      hasCustomPrompts: !!customPrompts,
+      hasUserCompetitors: !!userSelectedCompetitors,
+    });
+  }
+
   // Send start event
   await sendEvent({
     type: 'start',
@@ -80,7 +102,12 @@ export async function performAnalysis({
       });
     }
   } else {
-    competitors = await identifyCompetitors(company, sendEvent);
+    competitors = trace
+      ? await withSpan(trace, 'Identify Competitors', 
+          () => identifyCompetitors(company, sendEvent, trace),
+          { company: company.name, industry: company.industry }
+        )
+      : await identifyCompetitors(company, sendEvent);
   }
 
   // Stage 2: Generate prompts
@@ -106,7 +133,12 @@ export async function performAnalysis({
       category: 'custom' as const
     }));
   } else {
-    const prompts = await generatePromptsForCompany(company, competitors);
+    const prompts = trace
+      ? await withSpan(trace, 'Generate Analysis Prompts',
+          () => generatePromptsForCompany(company, competitors, trace),
+          { company: company.name, competitorCount: competitors.length }
+        )
+      : await generatePromptsForCompany(company, competitors);
     // Note: Changed from 8 to 4 to match UI - this should be configurable
     analysisPrompts = prompts.slice(0, 4);
   }
@@ -222,17 +254,15 @@ export async function performAnalysis({
           
           const analysisStartTime = Date.now();
           
-          // Use enhanced version when web search is enabled, otherwise use regular version
-          // Both versions now support the useWebSearch parameter
-          const analyzeFunction = useWebSearch ? analyzePromptWithProviderEnhanced : analyzePromptWithProvider;
-          
-          const response = await analyzeFunction(
+          // Use enhanced version for all analysis (handles both web search and non-web search)
+          const response = await analyzePromptWithProvider(
             prompt.prompt, 
             provider.name, 
             company.name, 
             competitors,
             useMockMode,
-            useWebSearch // Pass web search flag to both versions
+            useWebSearch,
+            trace  // Pass Langfuse trace
           );
           
           const analysisDuration = ((Date.now() - analysisStartTime) / 1000).toFixed(2);
@@ -273,6 +303,13 @@ export async function performAnalysis({
           // If using mock mode, add a small delay for visual effect
           if (useMockMode) {
             await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
+          }
+          
+          // Add delay to prevent rate limiting (especially for Anthropic)
+          // Anthropic has a 30k tokens/min limit, so we add delays between requests
+          if (!useMockMode) {
+            const delayMs = provider.name.toLowerCase() === 'anthropic' ? 2000 : 500;
+            await new Promise(resolve => setTimeout(resolve, delayMs));
           }
           
           responses.push(response);
@@ -436,27 +473,9 @@ export async function performAnalysis({
   // Analyze citations from responses
   let citationAnalysis: CitationAnalysis | undefined;
   try {
-    console.log('\n' + '═'.repeat(80));
-    console.log('📚 CITATION ANALYSIS PHASE');
-    console.log('═'.repeat(80));
-    console.log(`📊 Total responses to analyze: ${responses.length}`);
-    console.log(`🔍 Responses with citations: ${responses.filter(r => r.citations && r.citations.length > 0).length}`);
-    
-    responses.forEach((response, idx) => {
-      if (response.citations && response.citations.length > 0) {
-        console.log(`   ${idx + 1}. ${response.provider}: ${response.citations.length} citations`);
-      }
-    });
-    
     citationAnalysis = analyzeCitations(responses, company.name, competitors);
-    console.log(`\n✅ Citation Analysis Complete:`);
-    console.log(`   📑 Total unique sources: ${citationAnalysis.totalSources}`);
-    console.log(`   🏢 Brand citations: ${citationAnalysis.brandCitations.totalCitations}`);
-    console.log(`   👥 Competitor citations: ${Object.keys(citationAnalysis.competitorCitations).length} competitors tracked`);
-    console.log(`   🌐 Provider breakdown: ${Object.keys(citationAnalysis.providerBreakdown).length} providers`);
-    console.log('═'.repeat(80) + '\n');
   } catch (error) {
-    console.error('❌ Failed to analyze citations:', error);
+    console.error('Failed to analyze citations:', error);
     // Don't fail the entire analysis if citation analysis fails
   }
 
@@ -470,6 +489,34 @@ export async function performAnalysis({
     } as ProgressData,
     timestamp: new Date()
   });
+
+  // Update Langfuse trace with final results
+  if (trace) {
+    updateTraceOutput(trace, {
+      scores,
+      totalResponses: responses.length,
+      competitorCount: competitors.length,
+      promptCount: analysisPrompts.length,
+      citationSources: citationAnalysis?.totalSources,
+      errors: errors.length,
+    }, {
+      visibilityScore: scores.visibilityScore,
+      sentimentScore: scores.sentimentScore,
+      shareOfVoice: scores.shareOfVoice,
+      overallScore: scores.overallScore,
+      brandMentions: responses.filter(r => r.brandMentioned).length,
+      totalCitations: citationAnalysis?.totalSources || 0,
+      webSearchUsed: useWebSearch,
+    });
+
+    addEvent(trace, 'Analysis Completed', {
+      duration_seconds: (Date.now() - (trace as any).startTime) / 1000,
+      success: errors.length === 0,
+    });
+
+    // Flush Langfuse to ensure all traces are sent
+    await flushLangfuse();
+  }
 
   return {
     company,
