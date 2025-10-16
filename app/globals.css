@@ -1,5 +1,17 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@radix-ui/colors/slate.css";
+@import "@radix-ui/colors/slate-dark.css";
+@import "@radix-ui/colors/gray.css";
+@import "@radix-ui/colors/gray-dark.css";
+@import "@radix-ui/colors/blue.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/red.css";
+@import "@radix-ui/colors/red-dark.css";
+@import "@radix-ui/colors/green.css";
+@import "@radix-ui/colors/green-dark.css";
+@import "@radix-ui/colors/amber.css";
+@import "@radix-ui/colors/amber-dark.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -44,72 +56,117 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.5rem;
+
+  /* Radix Slate base colors */
+  --background: var(--slate-1);
+  --foreground: var(--slate-12);
+
+  --card: var(--slate-1);
+  --card-foreground: var(--slate-12);
+
+  --popover: var(--slate-1);
+  --popover-foreground: var(--slate-12);
+
+  --primary: var(--slate-12);
+  --primary-foreground: var(--slate-1);
+
+  --secondary: var(--slate-3);
+  --secondary-foreground: var(--slate-12);
+
+  --muted: var(--slate-3);
+  --muted-foreground: var(--slate-11);
+
+  --accent: var(--slate-4);
+  --accent-foreground: var(--slate-12);
+
+  --destructive: var(--red-9);
+  --destructive-foreground: var(--slate-1);
+
+  --border: var(--slate-6);
+  --input: var(--slate-6);
+  --ring: var(--slate-8);
+
+  --success: var(--green-9);
+  --success-foreground: var(--slate-1);
+
+  --warning: var(--amber-9);
+  --warning-foreground: var(--slate-1);
+
+  --info: var(--blue-9);
+  --info-foreground: var(--slate-1);
+
+  --chart-1: var(--blue-9);
+  --chart-2: var(--green-9);
+  --chart-3: var(--amber-9);
+  --chart-4: var(--red-9);
+  --chart-5: var(--slate-9);
+
+  --sidebar: var(--slate-2);
+  --sidebar-foreground: var(--slate-12);
+  --sidebar-primary: var(--slate-12);
+  --sidebar-primary-foreground: var(--slate-1);
+  --sidebar-accent: var(--slate-4);
+  --sidebar-accent-foreground: var(--slate-12);
+  --sidebar-border: var(--slate-6);
+  --sidebar-ring: var(--slate-8);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Profound AI Dark Mode - Matching exact design */
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+
+  --card: #171717;
+  --card-foreground: #fafafa;
+
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+
+  /* Orange accent matching Profound's branding */
+  --primary: #f97316;
+  --primary-foreground: #ffffff;
+
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+
+  --accent: #2c2c2c;
+  --accent-foreground: #fafafa;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+
+  --border: #2c2c2c;
+  --input: #2c2c2c;
+  --ring: #404040;
+
+  --success: #10b981;
+  --success-foreground: #fafafa;
+
+  --warning: #f59e0b;
+  --warning-foreground: #fafafa;
+
+  --info: #3b82f6;
+  --info-foreground: #fafafa;
+
+  /* Chart colors matching Profound's visualization */
+  --chart-1: #8b5cf6;  /* Purple */
+  --chart-2: #06b6d4;  /* Cyan */
+  --chart-3: #10b981;  /* Green */
+  --chart-4: #f59e0b;  /* Orange */
+  --chart-5: #3b82f6;  /* Blue */
+
+  --sidebar: #0a0a0a;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #f97316;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #2c2c2c;
+  --sidebar-ring: #404040;
 }
 
 @layer base {
@@ -380,3 +437,56 @@
   transform: translateY(2px) scale(0.97) !important;
   box-shadow: inset 0px 1px 1px 0px #18181b, 0px 1px 2px 0px rgba(24, 24, 27, 30%) !important;
 }
+
+/* Profound AI Dashboard Enhancements */
+.profound-gradient {
+  background: linear-gradient(135deg, #f97316 0%, #ff6b35 100%);
+}
+
+.profound-card-hover {
+  transition: all 0.2s ease-in-out;
+}
+
+.profound-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Smooth scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #171717;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #404040;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #525252;
+}
+
+/* Chart tooltip enhancements */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+/* Better focus states for dark mode */
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+}
+
+/* Profound brand colors for data visualization */
+.profound-purple { color: #8b5cf6; }
+.profound-cyan { color: #06b6d4; }
+.profound-green { color: #10b981; }
+.profound-orange { color: #f97316; }
+.profound-blue { color: #3b82f6; }

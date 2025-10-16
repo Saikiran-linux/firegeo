@@ -10,8 +10,8 @@ interface AutumnCustomerContextType {
 
 const AutumnCustomerContext = createContext<AutumnCustomerContextType | null>(null);
 
-// Provider component
-export function AutumnCustomerProvider({ children }: { children: ReactNode }) {
+// Inner provider that uses the autumn hook
+function AutumnCustomerProviderInner({ children }: { children: ReactNode }) {
   const { refetch } = useAutumnCustomer({ skip: true });
 
   const refetchCustomer = useCallback(async () => {
@@ -22,6 +22,15 @@ export function AutumnCustomerProvider({ children }: { children: ReactNode }) {
     <AutumnCustomerContext.Provider value={{ refetchCustomer }}>
       {children}
     </AutumnCustomerContext.Provider>
+  );
+}
+
+// Provider component - now just passes through to the inner provider
+export function AutumnCustomerProvider({ children }: { children: ReactNode }) {
+  return (
+    <AutumnCustomerProviderInner>
+      {children}
+    </AutumnCustomerProviderInner>
   );
 }
 
