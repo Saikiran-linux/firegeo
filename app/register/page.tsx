@@ -31,8 +31,8 @@ export default function RegisterPage() {
         // Wait a moment for the session to be properly set
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Force a hard navigation to ensure cookies are sent
-        window.location.href = '/';
+        // Redirect new users to onboarding
+        window.location.href = '/onboarding';
       } else {
         throw response.error;
       }

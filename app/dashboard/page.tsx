@@ -17,23 +17,98 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  Area,
-  AreaChart
+  Line,
+  LineChart,
+  Legend
 } from 'recharts';
 
-// Mock data for fallback
-const mockVisibilityData = [
-  { date: 'Jul 10', vercel: 50, netlify: 60 },
-  { date: 'Jul 12', vercel: 55, netlify: 45 },
-  { date: 'Jul 14', vercel: 58, netlify: 38 },
-  { date: 'Jul 16', vercel: 56, netlify: 25 },
-  { date: 'Jul 18', vercel: 52, netlify: 35 },
-  { date: 'Jul 20', vercel: 50, netlify: 38 },
-  { date: 'Jul 22', vercel: 65, netlify: 32 },
-  { date: 'Jul 24', vercel: 75, netlify: 30 },
-  { date: 'Jul 26', vercel: 85, netlify: 35 },
-  { date: 'Jul 28', vercel: 82, netlify: 40 },
-];
+// Helper function to generate visibility chart data over time
+const generateVisibilityChartData = (
+  analyses: any[],
+  yourBrandName: string,
+  showCompetitor: boolean
+) => {
+  if (!analyses || analyses.length === 0) return [];
+
+  // Get all analyses and calculate visibility for each
+  const chartData = analyses
+    .slice(0, 30) // Last 30 analyses
+    .reverse() // Show oldest to newest
+    .map((analysis) => {
+      const analysisData = (analysis.analysisData || {}) as any;
+      const oldResponses = analysisData.responses || [];
+      const promptResults = analysisData.promptResults || [];
+      
+      // Convert promptResults to responses
+      const promptResponses: any[] = [];
+      promptResults.forEach((promptResult: any) => {
+        promptResult.results?.forEach((result: any) => {
+          if (result.response || result.text) {
+            promptResponses.push({
+              response: result.response || result.text || '',
+              text: result.response || result.text || '',
+            });
+          }
+        });
+      });
+      
+      const allResponses = [...oldResponses, ...promptResponses];
+      const brandNameLower = (analysisData.company?.name || analysis.companyName || yourBrandName).toLowerCase();
+      
+      // Calculate brand visibility
+      let brandMentions = 0;
+      allResponses.forEach((response: any) => {
+        const text = (response.response || response.text || '').toLowerCase();
+        if (text.includes(brandNameLower)) {
+          brandMentions++;
+        }
+      });
+      
+      const brandVisibility = allResponses.length > 0 
+        ? (brandMentions / allResponses.length) * 100 
+        : 0;
+      
+      // Calculate competitor visibility if needed
+      let competitorVisibility = 0;
+      if (showCompetitor) {
+        const competitorsMap = new Map<string, number>();
+        
+        allResponses.forEach((response: any) => {
+          const citations = response.citations || [];
+          citations.forEach((citation: any) => {
+            if (citation.mentionedCompanies) {
+              citation.mentionedCompanies.forEach((company: string) => {
+                if (company && company.toLowerCase() !== brandNameLower) {
+                  competitorsMap.set(company, (competitorsMap.get(company) || 0) + 1);
+                }
+              });
+            }
+          });
+        });
+        
+        // Get top competitor visibility
+        const topCompetitor = Array.from(competitorsMap.entries())
+          .sort((a, b) => b[1] - a[1])[0];
+        
+        if (topCompetitor && allResponses.length > 0) {
+          competitorVisibility = (topCompetitor[1] / allResponses.length) * 100;
+        }
+      }
+      
+      // Format date
+      const date = new Date(analysis.createdAt || analysis.timestamp || Date.now());
+      const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      
+      return {
+        date: formattedDate,
+        fullDate: date,
+        brandVisibility,
+        competitorVisibility: showCompetitor ? competitorVisibility : undefined,
+      };
+    });
+  
+  return chartData;
+};
 
 const mockTopSources = [
   { rank: 1, source: 'AWS', mentions: 32 },
@@ -65,8 +140,177 @@ export default function DashboardPage() {
   // Get the most recent analysis
   const latestAnalysis = useMemo(() => {
     if (!analyses || analyses.length === 0) return null;
-    return analyses[0];
+    const latest = analyses[0];
+    const analysisData = latest?.analysisData as any;
+    console.log('[Dashboard] Latest Analysis Data:', {
+      hasPromptResults: !!analysisData?.promptResults,
+      promptResultsCount: analysisData?.promptResults?.length || 0,
+      hasResponses: !!analysisData?.responses,
+      responsesCount: analysisData?.responses?.length || 0,
+      hasCompetitors: !!analysisData?.competitors,
+      competitorsCount: analysisData?.competitors?.length || 0,
+    });
+    return latest;
   }, [analyses]);
+
+  // Calculate comprehensive metrics from BOTH prompt results AND old responses
+  const dashboardMetrics = useMemo(() => {
+    if (!latestAnalysis?.analysisData) return null;
+
+    const analysisData = latestAnalysis.analysisData as any;
+    const oldResponses = analysisData.responses || [];
+    const promptResults = analysisData.promptResults || [];
+    const yourBrandName = analysisData.company?.name || latestAnalysis.companyName || 'Your Brand';
+
+    // Convert promptResults to unified response format
+    const promptResponses: any[] = [];
+    promptResults.forEach((promptResult: any) => {
+      promptResult.results?.forEach((result: any) => {
+        if (result.response || result.text) {
+          promptResponses.push({
+            provider: result.provider || 'Unknown',
+            response: result.response || result.text || '',
+            prompt: promptResult.prompt,
+            citations: result.citations || result.sources || [],
+            timestamp: result.timestamp,
+          });
+        }
+      });
+    });
+
+    const allResponses = [...oldResponses, ...promptResponses];
+    console.log('[Dashboard] Total Responses:', {
+      old: oldResponses.length,
+      fromPrompts: promptResponses.length,
+      total: allResponses.length
+    });
+
+    // Calculate metrics from all responses
+    let totalMentions = 0;
+    const sourcesMap = new Map<string, number>();
+    const urlsMap = new Map<string, number>();
+    const competitorsMap = new Map<string, { name: string; mentions: number; }>();
+
+    allResponses.forEach((response: any) => {
+      // Check for brand mentions
+      const text = (response.response || response.text || '').toLowerCase();
+      if (text.includes(yourBrandName.toLowerCase())) {
+        totalMentions++;
+      }
+
+      // Track citations/sources
+      const citations = response.citations || [];
+      citations.forEach((citation: any) => {
+        const url = citation.url;
+        
+        // Skip Google's internal proxy URLs
+        if (url && url.includes('vertexaisearch.cloud.google.com')) {
+          return;
+        }
+        
+        let domain = citation.domain || citation.source;
+        if (!domain && url) {
+          try {
+            domain = new URL(url).hostname;
+          } catch (e) {
+            // ignore
+          }
+        }
+        
+        // Skip if domain is the Google proxy
+        if (domain && domain.includes('vertexaisearch.cloud.google.com')) {
+          return;
+        }
+        
+        if (domain) {
+          sourcesMap.set(domain, (sourcesMap.get(domain) || 0) + 1);
+        }
+        if (url) {
+          urlsMap.set(url, (urlsMap.get(url) || 0) + 1);
+        }
+
+        // Track mentioned companies as competitors
+        if (citation.mentionedCompanies) {
+          citation.mentionedCompanies.forEach((company: string) => {
+            if (company && company.toLowerCase() !== yourBrandName.toLowerCase()) {
+              const existing = competitorsMap.get(company) || { name: company, mentions: 0 };
+              existing.mentions++;
+              competitorsMap.set(company, existing);
+            }
+          });
+        }
+      });
+    });
+
+    // Create top sources list
+    const topSources = Array.from(sourcesMap.entries())
+      .map(([domain, count]) => ({ domain, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Create top URLs list
+    const topUrls = Array.from(urlsMap.entries())
+      .map(([url, count]) => ({ url, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Create competitors list with visibility scores
+    const competitors = Array.from(competitorsMap.values())
+      .map(c => ({
+        ...c,
+        visibilityScore: allResponses.length > 0 ? (c.mentions / allResponses.length) * 100 : 0,
+      }))
+      .sort((a, b) => b.mentions - a.mentions);
+
+    // Calculate visibility score
+    const visibilityScore = allResponses.length > 0 
+      ? (totalMentions / allResponses.length) * 100 
+      : 0;
+
+    // Calculate total market mentions (including brand)
+    const totalCompetitorMentions = competitors.reduce((sum, c) => sum + c.mentions, 0);
+    const totalMarketMentions = totalMentions + totalCompetitorMentions;
+    
+    // Calculate share of voice (market share)
+    const shareOfVoice = totalMarketMentions > 0
+      ? (totalMentions / totalMarketMentions) * 100
+      : 0;
+    
+    // Add market share to competitors and include the brand itself for ranking
+    const allBrandsWithShare = [
+      {
+        name: yourBrandName || latestAnalysis.companyName || 'Your Brand',
+        mentions: totalMentions,
+        marketShare: shareOfVoice,
+        isYourBrand: true,
+      },
+      ...competitors.map(c => ({
+        name: c.name,
+        mentions: c.mentions,
+        marketShare: totalMarketMentions > 0 ? (c.mentions / totalMarketMentions) * 100 : 0,
+        isYourBrand: false,
+      }))
+    ].sort((a, b) => b.mentions - a.mentions); // Sort by mentions descending
+    
+    // Find actual rank of the brand
+    const brandRank = allBrandsWithShare.findIndex(b => b.isYourBrand) + 1;
+
+    const metrics = {
+      visibilityScore,
+      shareOfVoice,
+      totalMentions,
+      totalResponses: allResponses.length,
+      topSources,
+      topUrls,
+      competitors,
+      allBrandsWithShare,
+      brandRank,
+      totalMarketMentions,
+      promptResults: promptResults.length,
+      promptsCount: analysisData.prompts?.length || 0,
+    };
+
+    console.log('[Dashboard] Calculated Metrics:', metrics);
+    return metrics;
+  }, [latestAnalysis]);
 
   // Get credits from customer data
   const credits = customer?.features?.messages?.balance || 0;
@@ -163,9 +407,9 @@ export default function DashboardPage() {
         )}
 
         {/* Dashboard Content */}
-        {!loading && !error && latestAnalysis && latestAnalysis.analysisData && (
+        {!loading && !error && latestAnalysis && dashboardMetrics && (
           <>
-            {/* Metric Cards */}
+            {/* Metric Cards - Row 1 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Brand Visibility */}
               <Card>
@@ -176,10 +420,10 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold">
-                    {latestAnalysis.analysisData.visibilityScore?.toFixed(1) || '0'}%
+                    {dashboardMetrics.visibilityScore.toFixed(1)}%
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Based on {latestAnalysis.analysisData.prompts?.length || 0} prompts simulated
+                    {dashboardMetrics.totalMentions} mentions in {dashboardMetrics.totalResponses} responses
                   </p>
                 </CardContent>
               </Card>
@@ -192,22 +436,19 @@ export default function DashboardPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {(() => {
-                    const topSource = latestAnalysis.analysisData.citationAnalysis?.topSources?.[0];
-                    return topSource ? (
-                      <>
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="w-8 h-8 bg-muted rounded flex items-center justify-center">
-                            <span className="text-lg">📰</span>
-                          </div>
-                          <div className="font-semibold truncate">{topSource.domain || topSource.url}</div>
+                  {dashboardMetrics.topSources[0] ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-8 h-8 bg-muted rounded flex items-center justify-center">
+                          <span className="text-lg">📰</span>
                         </div>
-                        <p className="text-sm text-muted-foreground">{topSource.count} mentions</p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No data available</p>
-                    );
-                  })()}
+                        <div className="font-semibold truncate">{dashboardMetrics.topSources[0].domain}</div>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{dashboardMetrics.topSources[0].count} citations</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No sources found</p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -219,22 +460,19 @@ export default function DashboardPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {(() => {
-                    const closestCompetitor = latestAnalysis.analysisData.competitors?.[1];
-                    return closestCompetitor ? (
-                      <>
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="w-8 h-8 bg-muted rounded flex items-center justify-center">
-                            <span className="text-lg">🏢</span>
-                          </div>
-                          <div className="font-semibold">{closestCompetitor.company?.name || 'N/A'}</div>
+                  {dashboardMetrics.competitors[0] ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-8 h-8 bg-muted rounded flex items-center justify-center">
+                          <span className="text-lg">🏢</span>
                         </div>
-                        <p className="text-sm text-muted-foreground">{closestCompetitor.mentions || 0} mentions</p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No competitors found</p>
-                    );
-                  })()}
+                        <div className="font-semibold">{dashboardMetrics.competitors[0].name}</div>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{dashboardMetrics.competitors[0].mentions} mentions</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No competitors found</p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -242,24 +480,79 @@ export default function DashboardPage() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Brand Ranking
+                    Market Ranking
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {(() => {
-                    const yourCompany = latestAnalysis.analysisData.competitors?.find((c: any) => c.isYourCompany);
-                    const rank = yourCompany?.rank || latestAnalysis.analysisData.competitors?.findIndex((c: any) => 
-                      c.company?.name?.toLowerCase() === latestAnalysis.analysisData.company?.name?.toLowerCase()
-                    ) + 1 || 1;
-                    return (
-                      <>
-                        <div className="text-3xl font-bold">#{rank}</div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {rank === 1 ? 'Market leader' : `Rank ${rank}`}
-                        </p>
-                      </>
-                    );
-                  })()}
+                  <div className="text-3xl font-bold">#{dashboardMetrics.brandRank}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Out of {dashboardMetrics.allBrandsWithShare.length} brands
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Additional Metric Cards - Row 2 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Share of Voice */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Market Share
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">
+                    {dashboardMetrics.shareOfVoice.toFixed(1)}%
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {dashboardMetrics.totalMentions} of {dashboardMetrics.totalMarketMentions} total mentions
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Total Competitors */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Competitors Found
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{dashboardMetrics.competitors.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Mentioned in responses
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Total Sources */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Unique Sources
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{dashboardMetrics.topSources.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Citation domains
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Prompts Executed */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Prompts Executed
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{dashboardMetrics.promptResults}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Out of {dashboardMetrics.promptsCount} total
+                  </p>
                 </CardContent>
               </Card>
             </div>
@@ -270,10 +563,10 @@ export default function DashboardPage() {
               <Card className="lg:col-span-2">
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle>Brand Visibility</CardTitle>
+                    <CardTitle>Brand Visibility Comparison</CardTitle>
                     <div className="flex items-center gap-3">
                       <label htmlFor="competitor-toggle" className="text-sm text-muted-foreground cursor-pointer">
-                        Show competitor visibility
+                        Show top competitor
                       </label>
                       <Switch
                         id="competitor-toggle"
@@ -282,16 +575,30 @@ export default function DashboardPage() {
                       />
                     </div>
                   </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Percentage of AI responses mentioning each brand
+                  </p>
                 </CardHeader>
                 <CardContent>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={mockVisibilityData}>
+                      <LineChart 
+                        data={generateVisibilityChartData(
+                          analyses || [],
+                          latestAnalysis.companyName || (latestAnalysis.analysisData as any)?.company?.name || 'Your Brand',
+                          showCompetitorVisibility
+                        )}
+                        margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                      >
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                         <XAxis 
                           dataKey="date" 
                           className="text-xs"
                           tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                          angle={-45}
+                          textAnchor="end"
+                          height={60}
+                          label={{ value: 'Date', position: 'insideBottom', offset: -10 }}
                         />
                         <YAxis 
                           className="text-xs"
@@ -300,46 +607,50 @@ export default function DashboardPage() {
                           ticks={[0, 20, 40, 60, 80, 100]}
                           label={{ value: 'Daily Visibility (%)', angle: -90, position: 'insideLeft' }}
                         />
-                        <Tooltip />
-                        <defs>
-                          <linearGradient id="vercelGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="netlifyGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <Area
+                        <Tooltip 
+                          formatter={(value: number, name: string) => [
+                            `${value.toFixed(1)}%`,
+                            name === 'brandVisibility' ? 'Your Brand' : 'Top Competitor'
+                          ]}
+                          labelFormatter={(label) => `Date: ${label}`}
+                        />
+                        <Line
                           type="monotone"
-                          dataKey="vercel"
+                          dataKey="brandVisibility"
+                          name="Your Brand"
                           stroke="hsl(var(--primary))"
-                          fill="url(#vercelGradient)"
-                          strokeWidth={2}
+                          strokeWidth={3}
+                          dot={{ fill: 'hsl(var(--primary))', r: 5 }}
+                          activeDot={{ r: 7 }}
                         />
                         {showCompetitorVisibility && (
-                          <Area
+                          <Line
                             type="monotone"
-                            dataKey="netlify"
+                            dataKey="competitorVisibility"
+                            name="Top Competitor"
                             stroke="hsl(var(--destructive))"
-                            fill="url(#netlifyGradient)"
-                            strokeWidth={2}
+                            strokeWidth={3}
                             strokeDasharray="5 5"
+                            dot={{ fill: 'hsl(var(--destructive))', r: 5 }}
+                            activeDot={{ r: 7 }}
                           />
                         )}
-                      </AreaChart>
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                   <div className="flex items-center gap-6 mt-4 justify-center">
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded-full bg-primary" />
-                      <span className="text-sm text-muted-foreground">Your Brand</span>
+                      <span className="text-sm text-muted-foreground">
+                        Your Brand ({dashboardMetrics.visibilityScore.toFixed(1)}%)
+                      </span>
                     </div>
-                    {showCompetitorVisibility && (
+                    {showCompetitorVisibility && dashboardMetrics.competitors[0] && (
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-destructive" />
-                        <span className="text-sm text-muted-foreground">Competitor</span>
+                        <span className="text-sm text-muted-foreground">
+                          {dashboardMetrics.competitors[0].name} ({(dashboardMetrics.competitors[0].visibilityScore || 0).toFixed(1)}%)
+                        </span>
                       </div>
                     )}
                   </div>
@@ -381,27 +692,34 @@ export default function DashboardPage() {
                   <div className="space-y-3">
                     <div className="flex text-xs text-muted-foreground mb-2">
                       <div className="flex-shrink-0 w-12">Rank</div>
-                      <div className="flex-1">Competitor</div>
-                      <div className="flex-shrink-0 w-24 text-right">Market Share</div>
+                      <div className="flex-1">Brand</div>
+                      <div className="flex-shrink-0 w-24 text-right">Mentions</div>
+                      <div className="flex-shrink-0 w-20 text-right">Share</div>
                     </div>
-                    {latestAnalysis.analysisData.competitors?.slice(0, 8).map((competitor: any, index: number) => {
+                    {/* Show All Brands Sorted by Rank */}
+                    {dashboardMetrics.allBrandsWithShare.slice(0, 8).map((brand: any, index: number) => {
                       const rank = index + 1;
-                      const isYou = competitor.isYourCompany || 
-                        competitor.company?.name?.toLowerCase() === latestAnalysis.analysisData.company?.name?.toLowerCase();
+                      const isYourBrand = brand.isYourBrand;
+                      
                       return (
-                        <div key={rank} className="flex items-center text-sm">
+                        <div 
+                          key={brand.name} 
+                          className={`flex items-center text-sm ${isYourBrand ? 'bg-primary/10 rounded px-2 py-2' : ''}`}
+                        >
                           <div className="flex-shrink-0 w-12 font-medium">{rank}</div>
-                          <div className="flex items-center gap-2 flex-1">
-                            <span className="text-lg">
-                              {isYou ? '⚫' : '🏢'}
-                            </span>
-                            <span className={isYou ? 'font-semibold' : ''}>
-                              {competitor.company?.name || 'Unknown'}
-                              {isYou && ' (You)'}
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-lg">{isYourBrand ? '⚫' : '🏢'}</span>
+                            <span className={`truncate ${isYourBrand ? 'font-semibold' : ''}`}>
+                              {brand.name} {isYourBrand ? '(You)' : ''}
                             </span>
                           </div>
                           <div className="flex-shrink-0 w-24 text-right font-medium">
-                            {competitor.shareOfVoice?.toFixed(1)}%
+                            {brand.mentions}
+                          </div>
+                          <div className="flex-shrink-0 w-20 text-right">
+                            <span className="text-xs text-muted-foreground">
+                              {brand.marketShare.toFixed(1)}%
+                            </span>
                           </div>
                         </div>
                       );
@@ -434,25 +752,28 @@ export default function DashboardPage() {
                     <div className="flex text-xs text-muted-foreground mb-2">
                       <div className="flex-shrink-0 w-12">Rank</div>
                       <div className="flex-1">Source</div>
-                      <div className="flex-shrink-0 w-32 text-right">Total Mentions</div>
+                      <div className="flex-shrink-0 w-32 text-right">Citations</div>
                     </div>
-                    {(latestAnalysis.analysisData.citationAnalysis?.topSources || mockTopSources).slice(0, 5).map((source: any, index: number) => {
+                    {dashboardMetrics.topSources.slice(0, 5).map((source: any, index: number) => {
                       const rank = index + 1;
                       return (
                         <div key={rank} className="flex items-center text-sm">
                           <div className="flex-shrink-0 w-12 font-medium">{rank}</div>
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <span className="text-lg">📰</span>
-                            <span className="truncate">
-                              {source.domain || source.source || 'Unknown'}
-                            </span>
+                            <span className="truncate">{source.domain}</span>
                           </div>
                           <div className="flex-shrink-0 w-32 text-right font-medium">
-                            {source.count || source.mentions || 0}
+                            {source.count}
                           </div>
                         </div>
                       );
                     })}
+                    {dashboardMetrics.topSources.length === 0 && (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        No sources found yet
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -478,32 +799,35 @@ export default function DashboardPage() {
                     <div className="flex text-xs text-muted-foreground mb-2">
                       <div className="flex-shrink-0 w-12">Rank</div>
                       <div className="flex-1">Web Page</div>
-                      <div className="flex-shrink-0 w-32 text-right">Total Mentions</div>
+                      <div className="flex-shrink-0 w-32 text-right">Citations</div>
                     </div>
-                    {(latestAnalysis.analysisData.citationAnalysis?.topUrls || mockTopWebPages).slice(0, 5).map((page: any, index: number) => {
+                    {dashboardMetrics.topUrls.slice(0, 5).map((page: any, index: number) => {
                       const rank = index + 1;
-                      const pageUrl = page.url || page;
-                      const mentions = page.count || page.mentions || 0;
                       return (
                         <div key={rank} className="flex items-center text-sm">
                           <div className="flex-shrink-0 w-12 font-medium">{rank}</div>
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <span className="text-lg">⚫</span>
                             <a 
-                              href={typeof pageUrl === 'string' ? pageUrl : pageUrl.url} 
+                              href={page.url} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="hover:underline truncate text-primary"
                             >
-                              {typeof pageUrl === 'string' ? pageUrl : pageUrl.url}
+                              {page.url}
                             </a>
                           </div>
                           <div className="flex-shrink-0 w-32 text-right font-medium">
-                            {mentions}
+                            {page.count}
                           </div>
                         </div>
                       );
                     })}
+                    {dashboardMetrics.topUrls.length === 0 && (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        No URLs found yet
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

@@ -248,13 +248,17 @@ export function extractCitationsFromResponse(
       if (metadata.google?.groundingMetadata?.groundingChunks) {
         metadata.google.groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
           if (chunk.web) {
-            citations.push({
-              url: chunk.web.uri || '',
-              title: chunk.web.title || '',
-              source: extractDomain(chunk.web.uri || ''),
-              position: index,
-              mentionedCompanies: []
-            });
+            const uri = chunk.web.uri || '';
+            // Skip Google's internal proxy URLs (vertexaisearch.cloud.google.com)
+            if (uri && !uri.includes('vertexaisearch.cloud.google.com')) {
+              citations.push({
+                url: uri,
+                title: chunk.web.title || '',
+                source: extractDomain(uri),
+                position: index,
+                mentionedCompanies: []
+              });
+            }
           }
         });
       }
@@ -307,13 +311,17 @@ export function extractCitationsFromResponse(
         if (response.groundingMetadata?.groundingChunks) {
           response.groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
             if (chunk.web) {
-              citations.push({
-                url: chunk.web.uri || '',
-                title: chunk.web.title,
-                source: chunk.web.title,
-                position: index,
-                mentionedCompanies: [] // Will be populated from response text analysis
-              });
+              const uri = chunk.web.uri || '';
+              // Skip Google's internal proxy URLs (vertexaisearch.cloud.google.com)
+              if (uri && !uri.includes('vertexaisearch.cloud.google.com')) {
+                citations.push({
+                  url: uri,
+                  title: chunk.web.title || '',
+                  source: extractDomain(uri),
+                  position: index,
+                  mentionedCompanies: [] // Will be populated from response text analysis
+                });
+              }
             }
           });
         }
@@ -440,6 +448,11 @@ function detectMentionedCompanies(
 
   // Helper function to check if a company name or its variations appear in text
   const isCompanyMentioned = (companyName: string): boolean => {
+    // Defensive check: ensure companyName is a string
+    if (!companyName || typeof companyName !== 'string') {
+      return false;
+    }
+    
     const lowerCompany = companyName.toLowerCase();
     
     // Direct full match
@@ -477,6 +490,10 @@ function detectMentionedCompanies(
 
   // Check competitors
   competitors.forEach(comp => {
+    // Ensure comp is a string
+    if (!comp || typeof comp !== 'string') {
+      return;
+    }
     if (isCompanyMentioned(comp)) {
       mentioned.push(comp);
     }

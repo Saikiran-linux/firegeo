@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionCookie } from 'better-auth/cookies';
 
 // Define protected routes
-const protectedRoutes = ['/dashboard', '/chat', '/brand-monitor'];
+const protectedRoutes = ['/dashboard', '/chat', '/brand-monitor', '/onboarding'];
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  
+  // Redirect /brand-monitor to /dashboard (migration complete)
+  if (pathname.startsWith('/brand-monitor')) {
+    const url = new URL('/dashboard', request.url);
+    return NextResponse.redirect(url);
+  }
   
   // Check if the route is protected
   const isProtectedRoute = protectedRoutes.some(route => 

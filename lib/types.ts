@@ -106,6 +106,12 @@ export interface AIResponse {
   confidence: number;
   timestamp: Date;
   citations?: Citation[]; // New field for citation tracking
+  sources?: Array<{
+    url: string;
+    title?: string;
+    snippet?: string;
+    sourceType?: string;
+  }>; // Sources from web search
   // Enhanced detection information
   detectionDetails?: {
     brandMatches?: {

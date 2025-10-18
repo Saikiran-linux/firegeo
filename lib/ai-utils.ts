@@ -790,13 +790,17 @@ ${useWebSearch ? '6. Prioritize recent, factual information from web searches' :
             // Extract from grounding chunks if sources didn't have them
             groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
               if (chunk.web) {
-                citations.push({
-                  url: chunk.web.uri || '',
-                  title: chunk.web.title || '',
-                  source: chunk.web.uri ? new URL(chunk.web.uri).hostname : '',
-                  position: index,
-                  mentionedCompanies: []
-                });
+                const uri = chunk.web.uri || '';
+                // Skip Google's internal proxy URLs (vertexaisearch.cloud.google.com)
+                if (uri && !uri.includes('vertexaisearch.cloud.google.com')) {
+                  citations.push({
+                    url: uri,
+                    title: chunk.web.title || '',
+                    source: new URL(uri).hostname,
+                    position: index,
+                    mentionedCompanies: []
+                  });
+                }
               }
             });
           }

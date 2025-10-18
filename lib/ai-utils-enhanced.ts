@@ -118,7 +118,7 @@ When responding to prompts about tools, platforms, or services:
       temperature: 0.7,
       ...(Object.keys(tools).length > 0 && { tools }),
       ...(useWebSearch && { stopWhen: stepCountIs(10) }),
-      maxRetries: 5, // Increase retries for rate limiting
+      maxRetries: 2, // Reduced retries - let the batch handler deal with rate limits
       experimental_providerMetadata: {
         anthropic: {
           cacheControl: { type: 'ephemeral' }, // Use prompt caching to reduce tokens
@@ -172,13 +172,17 @@ When responding to prompts about tools, platforms, or services:
           if (groundingMetadata.groundingChunks && citations.length === 0) {
             groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
               if (chunk.web) {
-                citations.push({
-                  url: chunk.web.uri || '',
-                  title: chunk.web.title || '',
-                  source: chunk.web.uri ? new URL(chunk.web.uri).hostname : '',
-                  position: index,
-                  mentionedCompanies: []
-                });
+                const uri = chunk.web.uri || '';
+                // Skip Google's internal proxy URLs (vertexaisearch.cloud.google.com)
+                if (uri && !uri.includes('vertexaisearch.cloud.google.com')) {
+                  citations.push({
+                    url: uri,
+                    title: chunk.web.title || '',
+                    source: new URL(uri).hostname,
+                    position: index,
+                    mentionedCompanies: []
+                  });
+                }
               }
             });
           }
@@ -335,6 +339,10 @@ Return ONLY the JSON object.`;
     const allMentionedCompetitors = new Set([...aiCompetitors]);
     
     competitors.forEach(competitor => {
+      // Ensure competitor is a string
+      if (!competitor || typeof competitor !== 'string') {
+        return;
+      }
       const competitorLower = competitor.toLowerCase();
       if (textLower.includes(competitorLower) || 
           textLower.includes(competitorLower.replace(/\s+/g, '')) ||
@@ -364,6 +372,14 @@ Return ONLY the JSON object.`;
         sentiment: r.sentiment,
       }));
 
+    // Format sources for return
+    const formattedSources = sources.map((s: any) => ({
+      url: s.url || s.uri || '',
+      title: s.title || '',
+      snippet: s.snippet || s.text || '',
+      sourceType: s.sourceType || 'url',
+    }));
+
     return {
       provider: providerDisplayName,
       prompt,
@@ -376,6 +392,7 @@ Return ONLY the JSON object.`;
       confidence: object.analysis.confidence,
       timestamp: new Date(),
       citations: citations.length > 0 ? citations : undefined,
+      sources: formattedSources.length > 0 ? formattedSources : undefined,
     };
   } catch (error: any) {
     // Check if it's a rate limit error
