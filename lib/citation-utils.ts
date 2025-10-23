@@ -347,7 +347,7 @@ export function extractCitationsFromResponse(
     // Provider Metadata (providerMetadata - non-experimental)
     // Some versions of AI SDK use non-experimental field
     // ============================================================
-    if (response?.providerMetadata && citations.length === 0) {
+    if (response?.providerMetadata) {
       const metadata = response.providerMetadata;
       
       // Google grounding metadata
@@ -690,13 +690,13 @@ export interface BrandVsCompetitorCitationMetrics {
     count: number;
     percentage: number;
     uniqueSources: number;
-    averagePosition: number;
+    averagePosition: number | null;
   };
   competitorCitations: Record<string, {
     count: number;
     percentage: number;
     uniqueSources: number;
-    averagePosition: number;
+    averagePosition: number | null;
     vsBrand: {
       difference: number;
       ratio: number;
@@ -735,14 +735,16 @@ export function calculateBrandVsCompetitorMetrics(
   );
   
   const brandUniqueSources = new Set(brandCitations.map(c => extractDomain(c.url)));
-  const brandAveragePosition = brandCitations.reduce((sum, c) => sum + (c.position || 0), 0) / (brandCitations.length || 1);
+  const brandAveragePosition = brandCitations.length > 0 
+    ? brandCitations.reduce((sum, c) => sum + (c.position || 0), 0) / brandCitations.length
+    : null;
 
   // Competitor citations
   const competitorData: Record<string, {
     count: number;
     percentage: number;
     uniqueSources: number;
-    averagePosition: number;
+    averagePosition: number | null;
     vsBrand: { difference: number; ratio: number };
   }> = {};
 
@@ -763,7 +765,9 @@ export function calculateBrandVsCompetitorMetrics(
     );
     
     const compUniqueSources = new Set(compCitations.map(c => extractDomain(c.url)));
-    const compAveragePosition = compCitations.reduce((sum, c) => sum + (c.position || 0), 0) / (compCitations.length || 1);
+    const compAveragePosition = compCitations.length > 0
+      ? compCitations.reduce((sum, c) => sum + (c.position || 0), 0) / compCitations.length
+      : null;
     
     const count = compCitations.length;
     const percentage = allCitations.length > 0 ? (count / allCitations.length) * 100 : 0;
@@ -775,7 +779,7 @@ export function calculateBrandVsCompetitorMetrics(
       averagePosition: compAveragePosition,
       vsBrand: {
         difference: count - brandCitations.length,
-        ratio: brandCitations.length > 0 ? count / brandCitations.length : count > 0 ? Infinity : 1
+        ratio: brandCitations.length > 0 ? count / brandCitations.length : count > 0 ? -1 : 0
       }
     };
 

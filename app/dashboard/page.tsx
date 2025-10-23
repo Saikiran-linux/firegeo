@@ -41,7 +41,7 @@ const generateVisibilityChartData = (
       
       // Get all results from prompt results
       const allResults = promptResults
-        .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+        .filter((pr: any) => pr && Array.isArray(pr.results) && pr.results.length > 0)
         .flatMap((pr: any) => pr.results);
       
       // Calculate brand visibility
@@ -57,7 +57,7 @@ const generateVisibilityChartData = (
         
         allResults.forEach((result: any) => {
           // Track from competitors field
-          if (result.competitors) {
+          if (Array.isArray(result.competitors)) {
             result.competitors.forEach((comp: any) => {
               const compName = comp.name || comp;
               if (compName && compName.toLowerCase() !== brandNameLower) {
@@ -140,9 +140,8 @@ export default function DashboardPage() {
 
     // Get all results from prompt results
     const allResults = promptResults
-      .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+      .filter((pr: any) => pr && Array.isArray(pr.results) && pr.results.length > 0)
       .flatMap((pr: any) => pr.results);
-
     console.log('[Dashboard] Total Results from Prompts:', allResults.length);
 
     if (allResults.length === 0) {
@@ -167,15 +166,13 @@ export default function DashboardPage() {
     // Calculate brand mentions from results
     const brandMentions = allResults.filter((r: any) => r.brandMentioned).length;
     const visibilityScore = (brandMentions / allResults.length) * 100;
-
     // Calculate average position
     const positions = allResults
-      .filter((r: any) => r.brandPosition && r.brandPosition < 999)
+      .filter((r: any) => typeof r.brandPosition === 'number' && r.brandPosition > 0 && r.brandPosition < 999)
       .map((r: any) => r.brandPosition!);
     const avgPosition = positions.length > 0 
       ? positions.reduce((a: number, b: number) => a + b, 0) / positions.length 
       : 0;
-
     // Calculate average sentiment
     const sentiments = allResults.filter((r: any) => r.sentimentScore !== undefined);
     const avgSentiment = sentiments.length > 0
@@ -232,7 +229,7 @@ export default function DashboardPage() {
       });
 
       // Also track competitors from result.competitors field
-      if (result.competitors) {
+      if (Array.isArray(result.competitors)) {
         result.competitors.forEach((comp: any) => {
           const compName = comp.name || comp;
           if (compName && compName.toLowerCase() !== yourBrandName) {
@@ -553,9 +550,15 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold">{dashboardMetrics.promptResults}</div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Out of {dashboardMetrics.promptsCount} total
-                  </p>
+                  {dashboardMetrics.promptsCount > 0 ? (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Out of {dashboardMetrics.promptsCount} total
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      No prompts available
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </div>

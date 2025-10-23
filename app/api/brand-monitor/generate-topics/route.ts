@@ -3,10 +3,13 @@ import { auth } from '@/lib/auth';
 import { handleApiError, AuthenticationError, ValidationError } from '@/lib/api-errors';
 import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || '',
-});
+if (!process.env.ANTHROPIC_API_KEY) {
+  throw new Error('ANTHROPIC_API_KEY environment variable is required');
+}
 
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 interface BrandTopic {
   id: string;
   name: string;
@@ -37,10 +40,46 @@ export async function POST(request: NextRequest) {
       throw new ValidationError('Company name is required');
     }
 
+    // Validate and parse count parameter
+    let parsedCount: number;
+    try {
+      parsedCount = count === undefined || count === null ? 3 : Number(count);
+      if (isNaN(parsedCount)) {
+        throw new ValidationError('Count must be a valid number');
+      }
+      if (!Number.isInteger(parsedCount)) {
+        throw new ValidationError('Count must be an integer (no decimal values)');
+      }
+      if (parsedCount < 1 || parsedCount > 10) {
+        throw new ValidationError('Count must be between 1 and 10');
+      }
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
+      throw new ValidationError('Count must be a valid integer between 1 and 10');
+    }
+
+    // Validate and parse promptsPerTopic parameter
+    let parsedPromptsPerTopic: number;
+    try {
+      parsedPromptsPerTopic = promptsPerTopic === undefined || promptsPerTopic === null ? 5 : Number(promptsPerTopic);
+      if (isNaN(parsedPromptsPerTopic)) {
+        throw new ValidationError('PromptsPerTopic must be a valid number');
+      }
+      if (!Number.isInteger(parsedPromptsPerTopic)) {
+        throw new ValidationError('PromptsPerTopic must be an integer (no decimal values)');
+      }
+      if (parsedPromptsPerTopic < 1 || parsedPromptsPerTopic > 20) {
+        throw new ValidationError('PromptsPerTopic must be between 1 and 20');
+      }
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
+      throw new ValidationError('PromptsPerTopic must be a valid integer between 1 and 20');
+    }
+
     const systemPrompt = `You are a brand visibility analyst. Generate relevant topics and prompts for tracking a company's brand visibility across AI platforms.
 
 Each topic should represent a specific use case or search scenario relevant to the company's business.
-Each topic should have ${promptsPerTopic} diverse prompts that users might ask AI assistants.
+Each topic should have ${parsedPromptsPerTopic} diverse prompts that users might ask AI assistants.
 
 CRITICAL: Generate prompts as GENERIC questions that real users would ask WITHOUT mentioning the specific company name.
 The prompts should be natural questions where AI assistants might mention the company in their responses.
@@ -59,7 +98,7 @@ Format your response as a valid JSON array of topics. Each topic should have:
 - id: a unique identifier (use format "topic-TIMESTAMP-INDEX")
 - name: a descriptive topic name
 - location: optional location code (e.g., "IN", "US", "Global")
-- prompts: array of ${promptsPerTopic} prompt objects, each with:
+- prompts: array of ${parsedPromptsPerTopic} prompt objects, each with:
   - id: unique identifier (use format "prompt-TIMESTAMP-INDEX")
   - prompt: the actual question/prompt text (NO brand names!)
   - topicId: the parent topic id
@@ -69,7 +108,7 @@ Make prompts natural, diverse, and realistic - exactly like real user questions.
     const userPrompt = `Company: ${companyName}
 ${companyUrl ? `Website: ${companyUrl}` : ''}
 
-Generate ${count} relevant topics with ${promptsPerTopic} prompts each for this company. Consider:
+Generate ${parsedCount} relevant topics with ${parsedPromptsPerTopic} prompts each for this company. Consider:
 1. Their industry and target market
 2. Common use cases and search scenarios
 3. Geographic relevance
@@ -106,11 +145,10 @@ Return ONLY a valid JSON array, no other text.`;
     // Extract JSON from response
     let jsonText = content.text.trim();
     
-    // Remove markdown code blocks if present
-    if (jsonText.startsWith('```json')) {
-      jsonText = jsonText.replace(/^```json\n/, '').replace(/\n```$/, '');
-    } else if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```\n/, '').replace(/\n```$/, '');
+    // Remove markdown code blocks if present - handles both ```json and ``` fences reliably
+    const jsonMatch = jsonText.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[1].trim();
     }
 
     let topics: BrandTopic[];
@@ -127,16 +165,21 @@ Return ONLY a valid JSON array, no other text.`;
 
     // Validate and enrich topics
     const now = Date.now();
-    topics = topics.map((topic, topicIdx) => {
+    const enrichedTopics = topics.map((topic, topicIdx) => {
       const topicId = topic.id || `topic-${now}-${topicIdx}`;
       
       // Ensure prompts are properly formatted
-      const prompts = (topic.prompts || []).map((prompt: any, promptIdx: number) => ({
-        id: prompt.id || `prompt-${now}-${topicIdx}-${promptIdx}`,
-        prompt: prompt.prompt || prompt,
-        topicId: topicId,
-      }));
-
+      const prompts = (topic.prompts || []).map((prompt: any, promptIdx: number) => {
+        const promptText = typeof prompt === 'string' 
+          ? prompt 
+          : (prompt?.prompt || `Prompt ${promptIdx + 1}`);
+        return {
+          id: prompt.id || `prompt-${now}-${topicIdx}-${promptIdx}`,
+          prompt: promptText,
+          topicId: topicId,
+        };
+      });
+      
       return {
         id: topicId,
         name: topic.name || `Topic ${topicIdx + 1}`,
@@ -146,11 +189,11 @@ Return ONLY a valid JSON array, no other text.`;
       };
     });
 
-    console.log(`[generate-topics] Successfully generated ${topics.length} topics with ${topics.reduce((sum, t) => sum + t.prompts.length, 0)} total prompts`);
+    console.log(`[generate-topics] Successfully generated ${enrichedTopics.length} topics with ${enrichedTopics.reduce((sum, t) => sum + t.prompts.length, 0)} total prompts`);
 
     return NextResponse.json({
-      message: `Generated ${topics.length} topics successfully`,
-      topics,
+      message: `Generated ${enrichedTopics.length} topics successfully`,
+      topics: enrichedTopics,
     });
   } catch (error) {
     console.error('[generate-topics] Error:', error);

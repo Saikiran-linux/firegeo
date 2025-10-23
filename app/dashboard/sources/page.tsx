@@ -13,6 +13,23 @@ import { useSession } from '@/lib/auth-client';
 import { calculateBrandVsCompetitorMetrics } from '@/lib/citation-utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+// Helper to get provider icon and color
+const getProviderIcon = (provider: string) => {
+  const providerLower = provider.toLowerCase();
+  switch (providerLower) {
+    case 'chatgpt':
+      return { icon: '🤖', color: 'bg-green-500/10 text-green-700 dark:text-green-400', name: 'ChatGPT' };
+    case 'claude':
+      return { icon: '🧠', color: 'bg-purple-500/10 text-purple-700 dark:text-purple-400', name: 'Claude' };
+    case 'gemini':
+      return { icon: '✨', color: 'bg-blue-500/10 text-blue-700 dark:text-blue-400', name: 'Gemini' };
+    case 'perplexity':
+      return { icon: '🔍', color: 'bg-orange-500/10 text-orange-700 dark:text-orange-400', name: 'Perplexity' };
+    default:
+      return { icon: '🔧', color: 'bg-gray-500/10 text-gray-700 dark:text-gray-400', name: provider };
+  }
+};
+
 export default function SourcesPage() {
   const { data: session, isPending: sessionLoading } = useSession();
   const router = useRouter();
@@ -31,8 +48,8 @@ export default function SourcesPage() {
   const competitiveMetrics = useMemo(() => {
     if (!latestAnalysis?.analysisData) return null;
     
-    const analysisData = latestAnalysis.analysisData;
-    const brandName = analysisData.company?.name || latestAnalysis.brandName || '';
+    const analysisData = latestAnalysis.analysisData as any;
+    const brandName = analysisData.company?.name || latestAnalysis.companyName || '';
     const competitors = analysisData.competitors || [];
     const promptResults = analysisData.promptResults || [];
     
@@ -52,7 +69,7 @@ export default function SourcesPage() {
   const sourceMetrics = useMemo(() => {
     if (!latestAnalysis?.analysisData) return null;
 
-    const analysisData = latestAnalysis.analysisData;
+    const analysisData = latestAnalysis.analysisData as any;
     const promptResults = analysisData.promptResults || [];
     const citationAnalysis = analysisData.citationAnalysis || {};
     
@@ -64,6 +81,9 @@ export default function SourcesPage() {
     const providerMap: Record<string, any> = {};
     const allSources = new Map<string, number>();
     const allUrls = new Map<string, number>();
+    // Track which providers cite each domain
+    const domainProviders = new Map<string, Set<string>>();
+    const urlProviders = new Map<string, Set<string>>();
     
     // Group by provider
     allResults.forEach((result: any) => {
@@ -114,6 +134,12 @@ export default function SourcesPage() {
             
             // All sources tracking
             allSources.set(domain, (allSources.get(domain) || 0) + 1);
+            
+            // Track which providers cite this domain
+            if (!domainProviders.has(domain)) {
+              domainProviders.set(domain, new Set());
+            }
+            domainProviders.get(domain)!.add(provider);
           }
           
           if (url) {
@@ -124,6 +150,12 @@ export default function SourcesPage() {
             
             // All URLs tracking
             allUrls.set(url, (allUrls.get(url) || 0) + 1);
+            
+            // Track which providers cite this URL
+            if (!urlProviders.has(url)) {
+              urlProviders.set(url, new Set());
+            }
+            urlProviders.get(url)!.add(provider);
           }
         });
       }
@@ -133,23 +165,33 @@ export default function SourcesPage() {
     Object.keys(providerMap).forEach((provider) => {
       const data = providerMap[provider];
       data.sourcesList = Array.from(data.sources.values())
-        .sort((a, b) => b.count - a.count);
+        .sort((a: any, b: any) => b.count - a.count);
       data.urlsList = Array.from(data.urls.values())
-        .sort((a, b) => b.count - a.count);
+        .sort((a: any, b: any) => b.count - a.count);
     });
 
     return {
       byProvider: providerMap,
       allSources: Array.from(allSources.entries())
-        .map(([domain, count]) => ({ domain, count }))
+        .map(([domain, count]) => ({ 
+          domain, 
+          count,
+          providers: Array.from(domainProviders.get(domain) || [])
+        }))
         .sort((a, b) => b.count - a.count),
       allUrls: Array.from(allUrls.entries())
-        .map(([url, count]) => ({ url, count }))
+        .map(([url, count]) => ({ 
+          url, 
+          count,
+          providers: Array.from(urlProviders.get(url) || [])
+        }))
         .sort((a, b) => b.count - a.count),
       totalSources: allSources.size,
       totalUrls: allUrls.size,
       totalCitations: allResults.reduce((sum: number, r: any) => sum + (r.citations?.length || 0), 0),
       citationAnalysis,
+      domainProviders,
+      urlProviders,
     };
   }, [latestAnalysis]);
 
@@ -481,7 +523,7 @@ export default function SourcesPage() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Avg Position</span>
-                              <span className="font-medium">{competitiveMetrics.brandCitations.averagePosition.toFixed(1)}</span>
+                              <span className="font-medium">{competitiveMetrics.brandCitations.averagePosition !== null ? competitiveMetrics.brandCitations.averagePosition.toFixed(1) : 'N/A'}</span>
                             </div>
                           </div>
                         </div>
@@ -489,10 +531,10 @@ export default function SourcesPage() {
                         {/* Top Competitor */}
                         {competitiveMetrics.citationGap.leadingCompetitor && (
                           <div className="p-4 bg-muted/30 rounded-lg border border-muted">
-                            <p className="text-sm font-semibold mb-3">
+                            <div className="text-sm font-semibold mb-3">
                               {competitiveMetrics.citationGap.leadingCompetitor}
                               <Badge variant="secondary" className="ml-2 text-xs">Leading</Badge>
-                            </p>
+                            </div>
                             <div className="space-y-2 text-xs">
                               {(() => {
                                 const topComp = competitiveMetrics.competitorCitations[competitiveMetrics.citationGap.leadingCompetitor];
@@ -508,7 +550,7 @@ export default function SourcesPage() {
                                     </div>
                                     <div className="flex justify-between">
                                       <span className="text-muted-foreground">Avg Position</span>
-                                      <span className="font-medium">{topComp.averagePosition.toFixed(1)}</span>
+                                      <span className="font-medium">{topComp.averagePosition !== null ? topComp.averagePosition.toFixed(1) : 'N/A'}</span>
                                     </div>
                                   </>
                                 ) : null;
@@ -531,7 +573,7 @@ export default function SourcesPage() {
                   </CardHeader>
                   <CardContent>
                     <Tabs defaultValue={competitiveMetrics.brandName} className="w-full">
-                      <TabsList className="grid w-full" style={{ gridTemplateColumns: `repeat(${1 + Object.keys(competitiveMetrics.topSourcesForCompetitors).length}, minmax(0, 1fr))` }}>
+                      <TabsList className="inline-flex w-full overflow-x-auto">
                         <TabsTrigger value={competitiveMetrics.brandName}>
                           {competitiveMetrics.brandName}
                         </TabsTrigger>
@@ -625,6 +667,7 @@ export default function SourcesPage() {
                     <div className="flex items-center text-xs font-medium text-muted-foreground pb-2 border-b">
                       <div className="w-12">Rank</div>
                       <div className="flex-1">Domain</div>
+                      {selectedProvider === 'all' && <div className="w-48">AI Bots</div>}
                       <div className="w-24 text-right">Citations</div>
                       <div className="w-32 text-right">Share</div>
                     </div>
@@ -641,12 +684,29 @@ export default function SourcesPage() {
                           <div className="w-12 text-sm font-medium text-muted-foreground">
                             {index + 1}
                           </div>
-                          <div className="flex-1 flex items-center gap-2">
-                            <Globe className="h-4 w-4 text-muted-foreground" />
+                          <div className="flex-1 flex items-center gap-2 min-w-0">
+                            <Globe className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                             <span className="text-sm font-medium truncate">
                               {source.domain}
                             </span>
                           </div>
+                          {selectedProvider === 'all' && source.providers && (
+                            <div className="w-48 flex items-center gap-1 flex-wrap">
+                              {source.providers.map((provider: string) => {
+                                const providerInfo = getProviderIcon(provider);
+                                return (
+                                  <Badge
+                                    key={provider}
+                                    variant="secondary"
+                                    className={`text-xs px-2 py-0.5 ${providerInfo.color}`}
+                                  >
+                                    <span className="mr-1">{providerInfo.icon}</span>
+                                    {providerInfo.name}
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          )}
                           <div className="w-24 text-right text-sm font-bold">
                             {source.count}
                           </div>
@@ -682,6 +742,7 @@ export default function SourcesPage() {
                     <div className="flex items-center text-xs font-medium text-muted-foreground pb-2 border-b">
                       <div className="w-12">Rank</div>
                       <div className="flex-1">URL</div>
+                      {selectedProvider === 'all' && <div className="w-48">AI Bots</div>}
                       <div className="w-24 text-right">Citations</div>
                       <div className="w-20 text-center">Visit</div>
                     </div>
@@ -701,6 +762,23 @@ export default function SourcesPage() {
                             {urlData.url}
                           </div>
                         </div>
+                        {selectedProvider === 'all' && urlData.providers && (
+                          <div className="w-48 flex items-center gap-1 flex-wrap">
+                            {urlData.providers.map((provider: string) => {
+                              const providerInfo = getProviderIcon(provider);
+                              return (
+                                <Badge
+                                  key={provider}
+                                  variant="secondary"
+                                  className={`text-xs px-2 py-0.5 ${providerInfo.color}`}
+                                >
+                                  <span className="mr-1">{providerInfo.icon}</span>
+                                  {providerInfo.name}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        )}
                         <div className="w-24 text-right text-sm font-bold">
                           {urlData.count}
                         </div>
