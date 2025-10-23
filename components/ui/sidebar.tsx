@@ -112,7 +112,14 @@ const SidebarProvider = React.forwardRef<
             ...style,
           } as React.CSSProperties
         }
-        className={cn("group/sidebar-wrapper flex min-h-svh w-full", className)}
+        className={cn(
+          "group/sidebar-wrapper grid h-svh min-h-svh w-full overflow-hidden transition-[grid-template-columns] duration-200",
+          state === "collapsed"
+            ? "md:grid-cols-[var(--sidebar-width-icon)_1fr]"
+            : "md:grid-cols-[var(--sidebar-width)_1fr]",
+          className
+        )}
+        data-state={state}
         ref={ref}
         {...props}
       >
@@ -168,7 +175,11 @@ const Sidebar = React.forwardRef<
   return (
     <div
       ref={ref}
-      className="group peer hidden md:block"
+      className={cn(
+        "group peer hidden md:block transition-[width] duration-200 ease-linear",
+        state === "collapsed" && collapsible === "icon" ? "w-[--sidebar-width-icon]" : "w-[--sidebar-width]",
+        state === "collapsed" && collapsible === "offcanvas" && "w-0"
+      )}
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -176,7 +187,7 @@ const Sidebar = React.forwardRef<
     >
       <div
         className={cn(
-          "duration-200 relative h-svh w-[--sidebar-width] bg-sidebar transition-[width] ease-linear",
+          "duration-200 sticky top-0 h-svh w-[--sidebar-width] bg-sidebar transition-[width] ease-linear",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -188,7 +199,7 @@ const Sidebar = React.forwardRef<
       >
         <div
           data-sidebar="sidebar"
-          className="duration-200 flex h-full w-[--sidebar-width] flex-col bg-sidebar text-sidebar-foreground transition-[width] ease-linear group-data-[collapsible=offcanvas]:w-0 group-data-[side=right]:rotate-180"
+          className="duration-200 flex h-full w-[--sidebar-width] flex-col bg-sidebar text-sidebar-foreground transition-[width] ease-linear group-data-[collapsible=offcanvas]:w-0 group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=right]:rotate-180"
         >
           {children}
         </div>
@@ -258,7 +269,7 @@ const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<"main
       <main
         ref={ref}
         className={cn(
-          "relative flex min-h-svh flex-1 flex-col bg-background",
+          "relative flex min-h-svh flex-1 flex-col bg-background md:h-svh md:overflow-y-auto",
           "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
           className
         )}
@@ -278,7 +289,14 @@ SidebarHeader.displayName = "SidebarHeader";
 
 const SidebarFooter = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
   ({ className, ...props }, ref) => {
-    return <div ref={ref} data-sidebar="footer" className={cn("flex flex-col gap-2 p-2", className)} {...props} />;
+    return (
+      <div
+        ref={ref}
+        data-sidebar="footer"
+        className={cn("flex flex-col gap-2 p-2", className)}
+        {...props}
+      />
+    );
   }
 );
 SidebarFooter.displayName = "SidebarFooter";
@@ -304,7 +322,10 @@ const SidebarContent = React.forwardRef<HTMLDivElement, React.ComponentProps<"di
       <div
         ref={ref}
         data-sidebar="content"
-        className={cn("flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden", className)}
+        className={cn(
+          "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+          className
+        )}
         {...props}
       />
     );

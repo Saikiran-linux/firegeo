@@ -16,7 +16,7 @@ function AuthAwareAutumnProvider({ children }: { children: React.ReactNode }) {
   // The provider will handle unauthenticated state internally
   return (
     <AutumnProvider
-      backendUrl="/api/auth/autumn"
+      backendUrl="/api/autumn"
       betterAuthUrl={process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}
       allowAnonymous={true}
       skipInitialFetch={!session && !isPending}

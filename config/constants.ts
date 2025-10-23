@@ -103,11 +103,12 @@ export const API_ENDPOINTS = {
   CREDITS: '/api/credits',
   USER_PROFILE: '/api/user/profile',
   USER_SETTINGS: '/api/user/settings',
-  BRAND_MONITOR_ANALYZE: '/api/brand-monitor/analyze',
   BRAND_MONITOR_SCRAPE: '/api/brand-monitor/scrape',
-  BRAND_MONITOR_BATCH_SCRAPE: '/api/brand-monitor/batch-scrape',
-  BRAND_MONITOR_WEB_SEARCH: '/api/brand-monitor/web-search',
-  BRAND_MONITOR_CHECK_PROVIDERS: '/api/brand-monitor/check-providers',
+  BRAND_MONITOR_ONBOARDING: '/api/brand-monitor/onboarding',
+  BRAND_MONITOR_PROMPTS: '/api/brand-monitor/prompts',
+  BRAND_MONITOR_GENERATE_PROMPTS: '/api/brand-monitor/generate-prompts',
+  BRAND_MONITOR_FIND_COMPETITORS: '/api/brand-monitor/find-competitors',
+  BRAND_MONITOR_ANALYSES: '/api/brand-monitor/analyses',
   CHAT_FEEDBACK: '/api/chat/feedback',
 } as const;
 

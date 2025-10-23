@@ -6,17 +6,27 @@ import { eq, desc } from 'drizzle-orm';
 import { handleApiError, AuthenticationError, ValidationError } from '@/lib/api-errors';
 import { analyzePromptWithProviderEnhanced } from '@/lib/ai-utils-enhanced';
 import { getConfiguredProviders } from '@/lib/provider-config';
+import { 
+  isLangfuseEnabled, 
+  createAnalysisTrace, 
+  updateTraceOutput, 
+  flushLangfuse,
+  addEvent
+} from '@/lib/langfuse-client';
+import { saveCitations, saveAggregatedSources } from '@/lib/db/citations';
+import { analyzeCitations, calculateBrandVsCompetitorMetrics } from '@/lib/citation-utils';
+import type { AIResponse, Citation, CitationAnalysis } from '@/lib/types';
 
 interface BrandPrompt {
   id: string;
   prompt: string;
-  category: 'ranking' | 'comparison' | 'alternatives' | 'recommendations';
+  topicId: string;
 }
 
 interface PromptResult {
   promptId: string;
   prompt: string;
-  category: string;
+  topicId?: string;
   results: {
     provider: string;
     response: string;
@@ -80,7 +90,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/brand-monitor/prompts - Add new prompts to latest analysis
+// POST /api/brand-monitor/prompts - Add new prompt to a topic
 export async function POST(request: NextRequest) {
   try {
     const sessionResponse = await auth.api.getSession({
@@ -92,20 +102,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const newPrompts: BrandPrompt[] = body.prompts || [];
+    const newPrompt: BrandPrompt = body.prompt;
 
-    if (!Array.isArray(newPrompts) || newPrompts.length === 0) {
-      throw new ValidationError('Prompts array is required and must not be empty');
-    }
-
-    // Validate each prompt
-    for (const prompt of newPrompts) {
-      if (!prompt.id || !prompt.prompt || !prompt.category) {
-        throw new ValidationError('Each prompt must have id, prompt, and category');
-      }
-      if (!['ranking', 'comparison', 'alternatives', 'recommendations'].includes(prompt.category)) {
-        throw new ValidationError(`Invalid category: ${prompt.category}`);
-      }
+    if (!newPrompt || !newPrompt.id || !newPrompt.prompt || !newPrompt.topicId) {
+      throw new ValidationError('Prompt must have id, prompt, and topicId');
     }
 
     // Get the latest analysis
@@ -121,24 +121,29 @@ export async function POST(request: NextRequest) {
 
     const analysis = analyses[0];
     const currentAnalysisData = (analysis.analysisData as any) || {};
-    const existingPrompts = currentAnalysisData.prompts || [];
+    const topics = currentAnalysisData.topics || [];
 
-    // Merge new prompts with existing ones (avoid duplicates)
-    const existingIds = new Set(existingPrompts.map((p: any) => p.id));
-    const promptsToAdd = newPrompts.filter((p) => !existingIds.has(p.id));
+    // Find the topic
+    const topicIndex = topics.findIndex((t: any) => t.id === newPrompt.topicId);
+    if (topicIndex === -1) {
+      throw new ValidationError('Topic not found');
+    }
 
-    if (promptsToAdd.length === 0) {
+    // Check if prompt already exists
+    const existingPromptIds = new Set(topics[topicIndex].prompts.map((p: any) => p.id));
+    if (existingPromptIds.has(newPrompt.id)) {
       return NextResponse.json({
-        message: 'All prompts already exist',
+        message: 'Prompt already exists',
         addedCount: 0,
-        totalPrompts: existingPrompts.length,
       });
     }
 
-    const updatedPrompts = [...existingPrompts, ...promptsToAdd];
+    // Add prompt to topic
+    topics[topicIndex].prompts.push(newPrompt);
+
     const updatedAnalysisData = {
       ...currentAnalysisData,
-      prompts: updatedPrompts,
+      topics,
     };
 
     // Update the analysis
@@ -151,10 +156,9 @@ export async function POST(request: NextRequest) {
       .where(eq(brandAnalyses.id, analysis.id));
 
     return NextResponse.json({
-      message: 'Prompts added successfully',
-      addedCount: promptsToAdd.length,
-      totalPrompts: updatedPrompts.length,
-      prompts: updatedPrompts,
+      message: 'Prompt added successfully',
+      addedCount: 1,
+      prompt: newPrompt,
     });
   } catch (error) {
     return handleApiError(error);
@@ -163,6 +167,13 @@ export async function POST(request: NextRequest) {
 
 // PUT /api/brand-monitor/prompts - Run all prompts against AI providers
 export async function PUT(request: NextRequest) {
+  // Create Langfuse trace for this analysis workflow
+  const trace = createAnalysisTrace('Brand Prompts Analysis', {
+    brandName: 'unknown', // Will be updated below
+    useWebSearch: true,
+    feature: 'prompts-analysis',
+  });
+
   try {
     const sessionResponse = await auth.api.getSession({
       headers: request.headers,
@@ -188,9 +199,18 @@ export async function PUT(request: NextRequest) {
     }
 
     const analysis = analyses[0];
-    let prompts = (analysis.analysisData as any)?.prompts || [];
+    const topics = (analysis.analysisData as any)?.topics || [];
+    
+    // Collect all prompts from all topics
+    let allPrompts: any[] = [];
+    topics.forEach((topic: any) => {
+      if (topic.prompts && Array.isArray(topic.prompts)) {
+        allPrompts.push(...topic.prompts);
+      }
+    });
     
     // Filter prompts if specific IDs were requested
+    let prompts = allPrompts;
     if (requestedPromptIds && Array.isArray(requestedPromptIds) && requestedPromptIds.length > 0) {
       const promptIdSet = new Set(requestedPromptIds);
       prompts = prompts.filter((p: any) => promptIdSet.has(p.id));
@@ -205,12 +225,24 @@ export async function PUT(request: NextRequest) {
       ? (analysis.analysisData as any).competitors.map((c: any) => String(c).trim()).filter((c: any) => c.length > 0)
       : [];
 
+    // Update trace with actual brand name
+    if (trace) {
+      addEvent(trace, 'analysis_started', {
+        companyName,
+        competitorsCount: competitors.length,
+        promptsCount: prompts.length,
+        userId: sessionResponse.user.id,
+      });
+    }
+
     // Get configured providers
     const providers = getConfiguredProviders();
 
     if (providers.length === 0) {
       throw new ValidationError('No AI providers configured');
     }
+
+    console.log(`[Langfuse] Starting analysis for ${companyName} with ${prompts.length} prompts across ${providers.length} providers`);
 
     // Process prompts in batches of 10 with parallel provider execution
     // Reduced from 20 to better manage rate limits
@@ -281,7 +313,7 @@ export async function PUT(request: NextRequest) {
       const promptResults: PromptResult = {
         promptId: prompt.id,
         prompt: prompt.prompt,
-        category: prompt.category,
+        topicId: prompt.topicId,
         results: [],
       };
 
@@ -301,7 +333,8 @@ export async function PUT(request: NextRequest) {
             companyName,
             competitors,
             false, // not mock mode
-            true // use web search
+            true, // use web search
+            trace // Pass Langfuse trace for cost tracking
           );
 
           console.log(`[prompts] ${provider.name} response received with ${response?.citations?.length || 0} citations`);
@@ -415,26 +448,155 @@ export async function PUT(request: NextRequest) {
 
     console.log(`[prompts] All prompts completed. Total results: ${results.length}`);
 
-    // Save results to analysis data
-    const updatedAnalysisData = {
-      ...(analysis.analysisData as any || {}),
-      promptResults: results,
-      lastRunAt: new Date().toISOString(),
-    };
+    // ==================================================================
+    // Extract and save citations from all provider responses
+    // ==================================================================
+    console.log(`[prompts] Extracting citations from results...`);
+    
+    // Convert promptResults to AIResponse format for citation analysis
+    const aiResponses: AIResponse[] = [];
+    let totalCitations = 0;
+    
+    for (const promptResult of results) {
+      for (const result of promptResult.results) {
+        if (!result.error && result.citations && result.citations.length > 0) {
+          aiResponses.push({
+            provider: result.provider,
+            prompt: promptResult.prompt,
+            response: result.response,
+            citations: result.citations as Citation[],
+            competitors: result.competitors?.map(c => c.name) || competitors,
+            brandMentioned: result.brandMentioned || false,
+            brandPosition: result.brandPosition,
+            sentiment: result.sentiment || 'neutral',
+            confidence: result.confidence || 0.5,
+            timestamp: new Date(result.timestamp),
+          });
+          totalCitations += result.citations.length;
+        }
+      }
+    }
 
-    await db
-      .update(brandAnalyses)
-      .set({
-        analysisData: updatedAnalysisData,
-        updatedAt: new Date(),
-      })
-      .where(eq(brandAnalyses.id, analysis.id));
+    console.log(`[prompts] Found ${totalCitations} citations from ${aiResponses.length} responses`);
+
+    // Save individual citations to database
+    if (aiResponses.length > 0) {
+      console.log(`[prompts] Saving citations to database...`);
+      
+      for (const response of aiResponses) {
+        if (response.citations && response.citations.length > 0) {
+          try {
+            await saveCitations(
+              analysis.id,
+              response.provider,
+              response.prompt,
+              response.citations
+            );
+            console.log(`[prompts] Saved ${response.citations.length} citations for ${response.provider}`);
+          } catch (error) {
+            console.error(`[prompts] Error saving citations for ${response.provider}:`, error);
+          }
+        }
+      }
+
+      // Analyze citations to build competitive metrics
+      console.log(`[prompts] Analyzing citations for competitive metrics...`);
+      const citationAnalysis: CitationAnalysis = analyzeCitations(
+        aiResponses,
+        companyName,
+        competitors
+      );
+
+      // Calculate brand vs competitor metrics
+      const competitiveMetrics = calculateBrandVsCompetitorMetrics(
+        aiResponses,
+        companyName,
+        competitors
+      );
+
+      console.log(`[prompts] Citation Analysis Summary:`);
+      console.log(`  - Total sources: ${citationAnalysis.totalSources}`);
+      console.log(`  - Brand citations: ${citationAnalysis.brandCitations.totalCitations}`);
+      console.log(`  - Brand share of voice: ${competitiveMetrics.shareOfVoice.brand.toFixed(1)}%`);
+      if (competitiveMetrics.citationGap.leadingCompetitor) {
+        console.log(`  - Leading competitor: ${competitiveMetrics.citationGap.leadingCompetitor} (+${competitiveMetrics.citationGap.gap} citations)`);
+      }
+
+      // Save aggregated citation sources
+      try {
+        await saveAggregatedSources(analysis.id, citationAnalysis);
+        console.log(`[prompts] Saved aggregated citation sources`);
+      } catch (error) {
+        console.error(`[prompts] Error saving aggregated sources:`, error);
+      }
+
+      // Add citation analysis to analysis data
+      const updatedAnalysisData = {
+        ...(analysis.analysisData as any || {}),
+        promptResults: results,
+        citationAnalysis,
+        competitiveMetrics,
+        lastRunAt: new Date().toISOString(),
+      };
+
+      await db
+        .update(brandAnalyses)
+        .set({
+          analysisData: updatedAnalysisData,
+          updatedAt: new Date(),
+        })
+        .where(eq(brandAnalyses.id, analysis.id));
+    } else {
+      // No citations found, just save the results
+      console.log(`[prompts] No citations found in responses`);
+      
+      const updatedAnalysisData = {
+        ...(analysis.analysisData as any || {}),
+        promptResults: results,
+        lastRunAt: new Date().toISOString(),
+      };
+
+      await db
+        .update(brandAnalyses)
+        .set({
+          analysisData: updatedAnalysisData,
+          updatedAt: new Date(),
+        })
+        .where(eq(brandAnalyses.id, analysis.id));
+    }
+
+    // Update trace with final results and flush to Langfuse
+    if (trace) {
+      updateTraceOutput(trace, {
+        totalPrompts: prompts.length,
+        totalProviders: providers.length,
+        totalResults: results.length,
+        successfulResults: results.reduce((sum, r) => sum + r.results.filter(res => !res.error).length, 0),
+        failedResults: results.reduce((sum, r) => sum + r.results.filter(res => res.error).length, 0),
+      }, {
+        companyName,
+        competitors,
+        promptsCount: prompts.length,
+        providersCount: providers.length,
+      });
+      
+      // Flush traces to Langfuse
+      await flushLangfuse();
+      console.log('[Langfuse] Trace completed and flushed');
+    }
 
     return NextResponse.json({
       message: 'Prompts executed successfully',
       results,
     });
   } catch (error) {
+    // Log error to trace if available
+    if (trace) {
+      addEvent(trace, 'analysis_error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await flushLangfuse();
+    }
     return handleApiError(error);
   }
 }
@@ -470,10 +632,24 @@ export async function DELETE(request: NextRequest) {
 
     const analysis = analyses[0];
     const currentAnalysisData = (analysis.analysisData as any) || {};
-    const prompts = currentAnalysisData.prompts || [];
+    const topics = currentAnalysisData.topics || [];
 
-    // Filter out the prompt to delete
-    const updatedPrompts = prompts.filter((p: any) => p.id !== promptId);
+    // Find and remove the prompt from its topic
+    let found = false;
+    for (const topic of topics) {
+      if (topic.prompts && Array.isArray(topic.prompts)) {
+        const initialLength = topic.prompts.length;
+        topic.prompts = topic.prompts.filter((p: any) => p.id !== promptId);
+        if (topic.prompts.length < initialLength) {
+          found = true;
+          break;
+        }
+      }
+    }
+
+    if (!found) {
+      throw new ValidationError('Prompt not found');
+    }
 
     // Also remove any results for this prompt
     const promptResults = currentAnalysisData.promptResults || [];
@@ -482,7 +658,7 @@ export async function DELETE(request: NextRequest) {
     // Update the analysis
     const updatedAnalysisData = {
       ...currentAnalysisData,
-      prompts: updatedPrompts,
+      topics,
       promptResults: updatedResults,
     };
 

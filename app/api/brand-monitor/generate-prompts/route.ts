@@ -77,7 +77,9 @@ export async function POST(request: NextRequest) {
     const category = body.category;
 
     // Build the prompt for Claude
-    const systemPrompt = `You are an expert in AI-powered brand monitoring and SEO. Your task is to generate natural, realistic search queries that users might ask AI assistants (like ChatGPT, Claude, Perplexity, Gemini) when looking for solutions in a specific industry.`;
+    const systemPrompt = `You are an expert in AI-powered brand monitoring and SEO. Your task is to generate natural, realistic search queries that users might ask AI assistants (like ChatGPT, Claude, Perplexity, Gemini) when looking for solutions in a specific industry.
+
+CRITICAL: Generate prompts as GENERIC questions WITHOUT mentioning any specific company or brand names. These should be questions that real users naturally ask, where AI assistants might then mention various brands in their responses.`;
 
     let categoryInstruction = '';
     if (category === 'ranking') {
@@ -114,9 +116,20 @@ ${categoryInstruction}
 Requirements:
 1. Make questions natural and conversational, as real users would ask
 2. Cover different aspects: features, use cases, pricing, comparisons, etc.
-3. Include questions that would naturally surface ${sanitizedCompanyName} or its competitors
-4. Vary question complexity and length
-5. CRITICAL: Each prompt MUST have a "category" field with one of these exact values: "ranking", "comparison", "alternatives", or "recommendations"
+3. DO NOT include "${sanitizedCompanyName}" or any specific brand names in the prompts
+4. Generate GENERIC questions where AI responses might naturally mention ${sanitizedCompanyName} or its competitors
+5. Vary question complexity and length
+6. CRITICAL: Each prompt MUST have a "category" field with one of these exact values: "ranking", "comparison", "alternatives", or "recommendations"
+
+Example GOOD prompts (generic, industry-focused):
+- "What are the best project management tools for remote teams?"
+- "Which CRM software has the most integrations?"
+- "Top accounting software for small businesses in 2024"
+
+Example BAD prompts (include brand names):
+- "What are the features of ${sanitizedCompanyName}?"
+- "How does ${sanitizedCompanyName} compare to competitors?"
+- "Is ${sanitizedCompanyName} worth the price?"
 
 Return ONLY a JSON array of objects with this EXACT structure:
 [

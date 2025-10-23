@@ -160,6 +160,13 @@ export function analyzeCitations(
 
 /**
  * Extract citations from provider-specific response formats
+ * Following AI SDK v5 patterns for OpenAI, Claude, Perplexity, and Google
+ * 
+ * Reference: AI SDK Documentation on Sources & Citations
+ * - OpenAI: responses API with web_search tool, sources in tool results
+ * - Claude: Citations API, sources in experimental_providerMetadata
+ * - Perplexity: Built-in sources in every response, access via sendSources
+ * - Google: Search grounding with sources[] and groundingMetadata
  */
 export function extractCitationsFromResponse(
   provider: string,
@@ -170,14 +177,46 @@ export function extractCitationsFromResponse(
   const citations: Citation[] = [];
 
   try {
-    // First, check for AI SDK's standardized tool results format
+    // ============================================================
+    // AI SDK v5 Standard Sources Format (result.sources)
+    // Works for OpenAI, Google, Perplexity when using AI SDK
+    // ============================================================
+    if (response?.sources && Array.isArray(response.sources)) {
+      console.log(`[Citation Extraction] Found ${response.sources.length} sources in result.sources`);
+      
+      response.sources.forEach((source: any, index: number) => {
+        // AI SDK standardizes sources as: { id, type, url, title, providerMetadata }
+        if (source.sourceType === 'url' || source.type === 'url') {
+          const url = source.url || '';
+          const title = source.title || '';
+          const snippet = source.snippet || source.content || '';
+          
+          citations.push({
+            url,
+            title,
+            snippet,
+            source: extractDomain(url),
+            position: index,
+            mentionedCompanies: detectMentionedCompanies(
+              `${title} ${snippet}`.trim(),
+              brandName,
+              competitors
+            )
+          });
+        }
+      });
+    }
+    
+    // ============================================================
+    // OpenAI: Tool Results from web_search tool
+    // Format: toolResults[].result with citations or search_results
+    // ============================================================
     if (response?.toolResults && Array.isArray(response.toolResults)) {
-      response.toolResults.forEach((toolResult: any, index: number) => {
-        
+      response.toolResults.forEach((toolResult: any) => {
         if (toolResult.toolName === 'web_search' || toolResult.toolName?.includes('search')) {
           const result = toolResult.result;
           
-          // Check for various citation formats
+          // OpenAI format: result.citations[]
           if (result?.citations && Array.isArray(result.citations)) {
             result.citations.forEach((citation: any) => {
               citations.push({
@@ -194,7 +233,7 @@ export function extractCitationsFromResponse(
             });
           }
           
-          // Check for search_results format
+          // Alternative format: result.search_results[]
           if (result?.search_results && Array.isArray(result.search_results)) {
             result.search_results.forEach((searchResult: any, idx: number) => {
               citations.push({
@@ -203,7 +242,11 @@ export function extractCitationsFromResponse(
                 snippet: searchResult.snippet || searchResult.content || '',
                 source: searchResult.source || extractDomain(searchResult.url || ''),
                 position: idx,
-                mentionedCompanies: []
+                mentionedCompanies: detectMentionedCompanies(
+                  `${searchResult.title} ${searchResult.snippet || ''}`.trim(),
+                  brandName,
+                  competitors
+                )
               });
             });
           }
@@ -240,12 +283,21 @@ export function extractCitationsFromResponse(
       });
     }
     
-    // Check experimental provider metadata
+    // ============================================================
+    // Provider Metadata (experimental_providerMetadata)
+    // Claude and Google specific metadata formats
+    // ============================================================
     if (response?.experimental_providerMetadata) {
       const metadata = response.experimental_providerMetadata;
       
-      // Google grounding metadata
+      // ============================================================
+      // Google: Grounding Metadata
+      // Format: experimental_providerMetadata.google.groundingMetadata
+      // Reference: AI SDK Google provider documentation
+      // ============================================================
       if (metadata.google?.groundingMetadata?.groundingChunks) {
+        console.log(`[Citation Extraction] Found ${metadata.google.groundingMetadata.groundingChunks.length} Google grounding chunks`);
+        
         metadata.google.groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
           if (chunk.web) {
             const uri = chunk.web.uri || '';
@@ -256,27 +308,67 @@ export function extractCitationsFromResponse(
                 title: chunk.web.title || '',
                 source: extractDomain(uri),
                 position: index,
-                mentionedCompanies: []
+                mentionedCompanies: detectMentionedCompanies(
+                  chunk.web.title || '',
+                  brandName,
+                  competitors
+                )
               });
             }
           }
         });
       }
       
-      // Anthropic citations
+      // ============================================================
+      // Claude (Anthropic): Citations API
+      // Format: experimental_providerMetadata.anthropic.citations
+      // Reference: Anthropic Citations API documentation
+      // ============================================================
       if (metadata.anthropic?.citations) {
+        console.log(`[Citation Extraction] Found ${metadata.anthropic.citations.length} Anthropic citations`);
+        
         metadata.anthropic.citations.forEach((citation: any) => {
           citations.push({
             url: citation.url || '',
-            title: citation.title || '',
+            title: citation.title || citation.document_title || '',
             snippet: citation.cited_text || '',
             source: extractDomain(citation.url || ''),
             mentionedCompanies: detectMentionedCompanies(
-              citation.cited_text || '',
+              `${citation.title || ''} ${citation.cited_text || ''}`.trim(),
               brandName,
               competitors
             )
           });
+        });
+      }
+    }
+    
+    // ============================================================
+    // Provider Metadata (providerMetadata - non-experimental)
+    // Some versions of AI SDK use non-experimental field
+    // ============================================================
+    if (response?.providerMetadata && citations.length === 0) {
+      const metadata = response.providerMetadata;
+      
+      // Google grounding metadata
+      if (metadata.google?.groundingMetadata?.groundingChunks) {
+        metadata.google.groundingMetadata.groundingChunks.forEach((chunk: any, index: number) => {
+          if (chunk.web) {
+            const uri = chunk.web.uri || '';
+            if (uri && !uri.includes('vertexaisearch.cloud.google.com')) {
+              citations.push({
+                url: uri,
+                title: chunk.web.title || '',
+                source: extractDomain(uri),
+                position: index,
+                mentionedCompanies: detectMentionedCompanies(
+                  chunk.web.title || '',
+                  brandName,
+                  competitors
+                )
+              });
+            }
+          }
         });
       }
     }
@@ -358,24 +450,65 @@ export function extractCitationsFromResponse(
         break;
 
       case 'perplexity':
-        // Perplexity returns search_results
+        // ============================================================
+        // Perplexity: Built-in search results
+        // Format: response.search_results[] or response.citations[]
+        // Reference: Perplexity API documentation
+        // ============================================================
+        console.log(`[Citation Extraction] Perplexity fallback extraction`);
+        
         if (response.search_results) {
           response.search_results.forEach((result: any, index: number) => {
             citations.push({
               url: result.url,
               title: result.title,
-              source: result.title,
+              source: extractDomain(result.url),
+              snippet: result.snippet || '',
               date: result.date,
               position: index,
-              mentionedCompanies: [] // Will be populated from response text
+              mentionedCompanies: detectMentionedCompanies(
+                `${result.title} ${result.snippet || ''}`.trim(),
+                brandName,
+                competitors
+              )
+            });
+          });
+        }
+        
+        // Alternative: citations array
+        if (response.citations && Array.isArray(response.citations)) {
+          response.citations.forEach((citation: any, index: number) => {
+            citations.push({
+              url: citation.url || '',
+              title: citation.title || '',
+              source: extractDomain(citation.url || ''),
+              snippet: citation.snippet || citation.text || '',
+              position: index,
+              mentionedCompanies: detectMentionedCompanies(
+                `${citation.title || ''} ${citation.snippet || citation.text || ''}`.trim(),
+                brandName,
+                competitors
+              )
             });
           });
         }
         break;
       }
     }
+    
+    // ============================================================
+    // Final Report
+    // ============================================================
+    if (citations.length > 0) {
+      console.log(`[Citation Extraction] ✅ Extracted ${citations.length} citations from ${provider}`);
+      console.log(`[Citation Extraction] Citations mentioning brand: ${citations.filter(c => c.mentionedCompanies?.includes(brandName)).length}`);
+      console.log(`[Citation Extraction] Citations mentioning competitors: ${citations.filter(c => c.mentionedCompanies?.some(comp => competitors.includes(comp))).length}`);
+    } else {
+      console.warn(`[Citation Extraction] ⚠️ No citations found for ${provider}`);
+    }
+    
   } catch (error) {
-    console.error(`Error extracting citations from ${provider}:`, error);
+    console.error(`[Citation Extraction] ❌ Error extracting citations from ${provider}:`, error);
   }
 
   return citations;
@@ -544,5 +677,215 @@ export function enhanceCitationsWithMentions(
       mentionedCompanies
     };
   });
+}
+
+/**
+ * Calculate brand vs competitor citation metrics
+ * Provides share-of-voice and competitive positioning analysis
+ */
+export interface BrandVsCompetitorCitationMetrics {
+  brandName: string;
+  totalCitations: number;
+  brandCitations: {
+    count: number;
+    percentage: number;
+    uniqueSources: number;
+    averagePosition: number;
+  };
+  competitorCitations: Record<string, {
+    count: number;
+    percentage: number;
+    uniqueSources: number;
+    averagePosition: number;
+    vsBrand: {
+      difference: number;
+      ratio: number;
+    };
+  }>;
+  shareOfVoice: {
+    brand: number;
+    competitors: Record<string, number>;
+  };
+  citationGap: {
+    leadingCompetitor: string | null;
+    gap: number;
+    gapPercentage: number;
+  };
+  topSourcesForBrand: { domain: string; count: number }[];
+  topSourcesForCompetitors: Record<string, { domain: string; count: number }[]>;
+}
+
+export function calculateBrandVsCompetitorMetrics(
+  responses: AIResponse[],
+  brandName: string,
+  competitors: string[]
+): BrandVsCompetitorCitationMetrics {
+  const allCitations: Citation[] = [];
+  
+  // Collect all citations
+  responses.forEach(response => {
+    if (response.citations && response.citations.length > 0) {
+      allCitations.push(...response.citations);
+    }
+  });
+
+  // Brand citations
+  const brandCitations = allCitations.filter(c => 
+    c.mentionedCompanies?.includes(brandName)
+  );
+  
+  const brandUniqueSources = new Set(brandCitations.map(c => extractDomain(c.url)));
+  const brandAveragePosition = brandCitations.reduce((sum, c) => sum + (c.position || 0), 0) / (brandCitations.length || 1);
+
+  // Competitor citations
+  const competitorData: Record<string, {
+    count: number;
+    percentage: number;
+    uniqueSources: number;
+    averagePosition: number;
+    vsBrand: { difference: number; ratio: number };
+  }> = {};
+
+  const topSourcesForBrand: Map<string, number> = new Map();
+  brandCitations.forEach(citation => {
+    const domain = extractDomain(citation.url);
+    topSourcesForBrand.set(domain, (topSourcesForBrand.get(domain) || 0) + 1);
+  });
+
+  const topSourcesForCompetitors: Record<string, { domain: string; count: number }[]> = {};
+
+  let leadingCompetitorName: string | null = null;
+  let maxCompetitorCitations = 0;
+
+  competitors.forEach(competitor => {
+    const compCitations = allCitations.filter(c => 
+      c.mentionedCompanies?.includes(competitor)
+    );
+    
+    const compUniqueSources = new Set(compCitations.map(c => extractDomain(c.url)));
+    const compAveragePosition = compCitations.reduce((sum, c) => sum + (c.position || 0), 0) / (compCitations.length || 1);
+    
+    const count = compCitations.length;
+    const percentage = allCitations.length > 0 ? (count / allCitations.length) * 100 : 0;
+    
+    competitorData[competitor] = {
+      count,
+      percentage,
+      uniqueSources: compUniqueSources.size,
+      averagePosition: compAveragePosition,
+      vsBrand: {
+        difference: count - brandCitations.length,
+        ratio: brandCitations.length > 0 ? count / brandCitations.length : count > 0 ? Infinity : 1
+      }
+    };
+
+    if (count > maxCompetitorCitations) {
+      maxCompetitorCitations = count;
+      leadingCompetitorName = competitor;
+    }
+
+    // Track top sources for this competitor
+    const compSourceMap: Map<string, number> = new Map();
+    compCitations.forEach(citation => {
+      const domain = extractDomain(citation.url);
+      compSourceMap.set(domain, (compSourceMap.get(domain) || 0) + 1);
+    });
+    
+    topSourcesForCompetitors[competitor] = Array.from(compSourceMap.entries())
+      .map(([domain, count]) => ({ domain, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  });
+
+  // Calculate share of voice
+  const totalMentions = brandCitations.length + Object.values(competitorData).reduce((sum, comp) => sum + comp.count, 0);
+  const brandSOV = totalMentions > 0 ? (brandCitations.length / totalMentions) * 100 : 0;
+  
+  const competitorSOV: Record<string, number> = {};
+  competitors.forEach(comp => {
+    competitorSOV[comp] = totalMentions > 0 ? (competitorData[comp].count / totalMentions) * 100 : 0;
+  });
+
+  // Citation gap analysis
+  const citationGap = leadingCompetitorName ? {
+    leadingCompetitor: leadingCompetitorName,
+    gap: maxCompetitorCitations - brandCitations.length,
+    gapPercentage: brandCitations.length > 0 
+      ? ((maxCompetitorCitations - brandCitations.length) / brandCitations.length) * 100 
+      : maxCompetitorCitations > 0 ? 100 : 0
+  } : {
+    leadingCompetitor: null,
+    gap: 0,
+    gapPercentage: 0
+  };
+
+  return {
+    brandName,
+    totalCitations: allCitations.length,
+    brandCitations: {
+      count: brandCitations.length,
+      percentage: allCitations.length > 0 ? (brandCitations.length / allCitations.length) * 100 : 0,
+      uniqueSources: brandUniqueSources.size,
+      averagePosition: brandAveragePosition
+    },
+    competitorCitations: competitorData,
+    shareOfVoice: {
+      brand: brandSOV,
+      competitors: competitorSOV
+    },
+    citationGap,
+    topSourcesForBrand: Array.from(topSourcesForBrand.entries())
+      .map(([domain, count]) => ({ domain, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+    topSourcesForCompetitors
+  };
+}
+
+/**
+ * Get citation trends over time (for time-series analysis)
+ */
+export interface CitationTrend {
+  date: string;
+  brandCitations: number;
+  competitorCitations: Record<string, number>;
+  totalCitations: number;
+}
+
+export function getCitationTrends(
+  analysisData: any[],
+  brandName: string,
+  competitors: string[]
+): CitationTrend[] {
+  const trends: CitationTrend[] = [];
+  
+  analysisData.forEach(analysis => {
+    if (!analysis.analysisData?.responses) return;
+    
+    const responses = analysis.analysisData.responses;
+    const allCitations: Citation[] = [];
+    
+    responses.forEach((response: AIResponse) => {
+      if (response.citations) {
+        allCitations.push(...response.citations);
+      }
+    });
+
+    const brandCount = allCitations.filter(c => c.mentionedCompanies?.includes(brandName)).length;
+    const competitorCounts: Record<string, number> = {};
+    
+    competitors.forEach(comp => {
+      competitorCounts[comp] = allCitations.filter(c => c.mentionedCompanies?.includes(comp)).length;
+    });
+
+    trends.push({
+      date: analysis.createdAt || new Date().toISOString(),
+      brandCitations: brandCount,
+      competitorCitations: competitorCounts,
+      totalCitations: allCitations.length
+    });
+  });
+
+  return trends.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 }
 

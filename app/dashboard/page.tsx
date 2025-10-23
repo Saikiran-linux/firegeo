@@ -36,36 +36,18 @@ const generateVisibilityChartData = (
     .reverse() // Show oldest to newest
     .map((analysis) => {
       const analysisData = (analysis.analysisData || {}) as any;
-      const oldResponses = analysisData.responses || [];
       const promptResults = analysisData.promptResults || [];
-      
-      // Convert promptResults to responses
-      const promptResponses: any[] = [];
-      promptResults.forEach((promptResult: any) => {
-        promptResult.results?.forEach((result: any) => {
-          if (result.response || result.text) {
-            promptResponses.push({
-              response: result.response || result.text || '',
-              text: result.response || result.text || '',
-            });
-          }
-        });
-      });
-      
-      const allResponses = [...oldResponses, ...promptResponses];
       const brandNameLower = (analysisData.company?.name || analysis.companyName || yourBrandName).toLowerCase();
       
-      // Calculate brand visibility
-      let brandMentions = 0;
-      allResponses.forEach((response: any) => {
-        const text = (response.response || response.text || '').toLowerCase();
-        if (text.includes(brandNameLower)) {
-          brandMentions++;
-        }
-      });
+      // Get all results from prompt results
+      const allResults = promptResults
+        .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+        .flatMap((pr: any) => pr.results);
       
-      const brandVisibility = allResponses.length > 0 
-        ? (brandMentions / allResponses.length) * 100 
+      // Calculate brand visibility
+      const brandMentions = allResults.filter((r: any) => r.brandMentioned).length;
+      const brandVisibility = allResults.length > 0 
+        ? (brandMentions / allResults.length) * 100 
         : 0;
       
       // Calculate competitor visibility if needed
@@ -73,8 +55,19 @@ const generateVisibilityChartData = (
       if (showCompetitor) {
         const competitorsMap = new Map<string, number>();
         
-        allResponses.forEach((response: any) => {
-          const citations = response.citations || [];
+        allResults.forEach((result: any) => {
+          // Track from competitors field
+          if (result.competitors) {
+            result.competitors.forEach((comp: any) => {
+              const compName = comp.name || comp;
+              if (compName && compName.toLowerCase() !== brandNameLower) {
+                competitorsMap.set(compName, (competitorsMap.get(compName) || 0) + 1);
+              }
+            });
+          }
+          
+          // Also track from citations
+          const citations = result.citations || [];
           citations.forEach((citation: any) => {
             if (citation.mentionedCompanies) {
               citation.mentionedCompanies.forEach((company: string) => {
@@ -90,8 +83,8 @@ const generateVisibilityChartData = (
         const topCompetitor = Array.from(competitorsMap.entries())
           .sort((a, b) => b[1] - a[1])[0];
         
-        if (topCompetitor && allResponses.length > 0) {
-          competitorVisibility = (topCompetitor[1] / allResponses.length) * 100;
+        if (topCompetitor && allResults.length > 0) {
+          competitorVisibility = (topCompetitor[1] / allResults.length) * 100;
         }
       }
       
@@ -109,22 +102,6 @@ const generateVisibilityChartData = (
   
   return chartData;
 };
-
-const mockTopSources = [
-  { rank: 1, source: 'AWS', mentions: 32 },
-  { rank: 2, source: 'Google Cloud', mentions: 28 },
-  { rank: 3, source: 'Microsoft Azure', mentions: 24 },
-  { rank: 4, source: 'Stack Overflow', mentions: 22 },
-  { rank: 5, source: 'Dev.to', mentions: 18 },
-];
-
-const mockTopWebPages = [
-  { rank: 1, url: 'https://example.com/', mentions: 37 },
-  { rank: 2, url: 'https://example.com/docs', mentions: 28 },
-  { rank: 3, url: 'https://example.com/blog', mentions: 22 },
-  { rank: 4, url: 'https://example.com/pricing', mentions: 18 },
-  { rank: 5, url: 'https://example.com/guides', mentions: 15 },
-];
 
 export default function DashboardPage() {
   const { data: session, isPending: sessionLoading } = useSession();
@@ -153,53 +130,66 @@ export default function DashboardPage() {
     return latest;
   }, [analyses]);
 
-  // Calculate comprehensive metrics from BOTH prompt results AND old responses
+  // Calculate comprehensive metrics from prompt results
   const dashboardMetrics = useMemo(() => {
     if (!latestAnalysis?.analysisData) return null;
 
     const analysisData = latestAnalysis.analysisData as any;
-    const oldResponses = analysisData.responses || [];
     const promptResults = analysisData.promptResults || [];
-    const yourBrandName = analysisData.company?.name || latestAnalysis.companyName || 'Your Brand';
+    const yourBrandName = (analysisData.company?.name || latestAnalysis.companyName || '').toLowerCase();
 
-    // Convert promptResults to unified response format
-    const promptResponses: any[] = [];
-    promptResults.forEach((promptResult: any) => {
-      promptResult.results?.forEach((result: any) => {
-        if (result.response || result.text) {
-          promptResponses.push({
-            provider: result.provider || 'Unknown',
-            response: result.response || result.text || '',
-            prompt: promptResult.prompt,
-            citations: result.citations || result.sources || [],
-            timestamp: result.timestamp,
-          });
-        }
-      });
-    });
+    // Get all results from prompt results
+    const allResults = promptResults
+      .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+      .flatMap((pr: any) => pr.results);
 
-    const allResponses = [...oldResponses, ...promptResponses];
-    console.log('[Dashboard] Total Responses:', {
-      old: oldResponses.length,
-      fromPrompts: promptResponses.length,
-      total: allResponses.length
-    });
+    console.log('[Dashboard] Total Results from Prompts:', allResults.length);
 
-    // Calculate metrics from all responses
-    let totalMentions = 0;
+    if (allResults.length === 0) {
+      return {
+        visibilityScore: 0,
+        shareOfVoice: 0,
+        totalMentions: 0,
+        totalResponses: 0,
+        topSources: [],
+        topUrls: [],
+        competitors: [],
+        allBrandsWithShare: [],
+        brandRank: 0,
+        totalMarketMentions: 0,
+        promptResults: 0,
+        promptsCount: 0,
+        avgPosition: 0,
+        avgSentiment: 0,
+      };
+    }
+
+    // Calculate brand mentions from results
+    const brandMentions = allResults.filter((r: any) => r.brandMentioned).length;
+    const visibilityScore = (brandMentions / allResults.length) * 100;
+
+    // Calculate average position
+    const positions = allResults
+      .filter((r: any) => r.brandPosition && r.brandPosition < 999)
+      .map((r: any) => r.brandPosition!);
+    const avgPosition = positions.length > 0 
+      ? positions.reduce((a: number, b: number) => a + b, 0) / positions.length 
+      : 0;
+
+    // Calculate average sentiment
+    const sentiments = allResults.filter((r: any) => r.sentimentScore !== undefined);
+    const avgSentiment = sentiments.length > 0
+      ? sentiments.reduce((sum: number, r: any) => sum + r.sentimentScore!, 0) / sentiments.length
+      : 0;
+
+    // Track sources and URLs from citations
     const sourcesMap = new Map<string, number>();
     const urlsMap = new Map<string, number>();
     const competitorsMap = new Map<string, { name: string; mentions: number; }>();
 
-    allResponses.forEach((response: any) => {
-      // Check for brand mentions
-      const text = (response.response || response.text || '').toLowerCase();
-      if (text.includes(yourBrandName.toLowerCase())) {
-        totalMentions++;
-      }
-
-      // Track citations/sources
-      const citations = response.citations || [];
+    allResults.forEach((result: any) => {
+      const citations = result.citations || [];
+      
       citations.forEach((citation: any) => {
         const url = citation.url;
         
@@ -232,7 +222,7 @@ export default function DashboardPage() {
         // Track mentioned companies as competitors
         if (citation.mentionedCompanies) {
           citation.mentionedCompanies.forEach((company: string) => {
-            if (company && company.toLowerCase() !== yourBrandName.toLowerCase()) {
+            if (company && company.toLowerCase() !== yourBrandName) {
               const existing = competitorsMap.get(company) || { name: company, mentions: 0 };
               existing.mentions++;
               competitorsMap.set(company, existing);
@@ -240,6 +230,18 @@ export default function DashboardPage() {
           });
         }
       });
+
+      // Also track competitors from result.competitors field
+      if (result.competitors) {
+        result.competitors.forEach((comp: any) => {
+          const compName = comp.name || comp;
+          if (compName && compName.toLowerCase() !== yourBrandName) {
+            const existing = competitorsMap.get(compName) || { name: compName, mentions: 0 };
+            existing.mentions++;
+            competitorsMap.set(compName, existing);
+          }
+        });
+      }
     });
 
     // Create top sources list
@@ -256,29 +258,24 @@ export default function DashboardPage() {
     const competitors = Array.from(competitorsMap.values())
       .map(c => ({
         ...c,
-        visibilityScore: allResponses.length > 0 ? (c.mentions / allResponses.length) * 100 : 0,
+        visibilityScore: allResults.length > 0 ? (c.mentions / allResults.length) * 100 : 0,
       }))
       .sort((a, b) => b.mentions - a.mentions);
 
-    // Calculate visibility score
-    const visibilityScore = allResponses.length > 0 
-      ? (totalMentions / allResponses.length) * 100 
-      : 0;
-
     // Calculate total market mentions (including brand)
     const totalCompetitorMentions = competitors.reduce((sum, c) => sum + c.mentions, 0);
-    const totalMarketMentions = totalMentions + totalCompetitorMentions;
+    const totalMarketMentions = brandMentions + totalCompetitorMentions;
     
     // Calculate share of voice (market share)
     const shareOfVoice = totalMarketMentions > 0
-      ? (totalMentions / totalMarketMentions) * 100
+      ? (brandMentions / totalMarketMentions) * 100
       : 0;
     
     // Add market share to competitors and include the brand itself for ranking
     const allBrandsWithShare = [
       {
-        name: yourBrandName || latestAnalysis.companyName || 'Your Brand',
-        mentions: totalMentions,
+        name: analysisData.company?.name || latestAnalysis.companyName || 'Your Brand',
+        mentions: brandMentions,
         marketShare: shareOfVoice,
         isYourBrand: true,
       },
@@ -293,11 +290,15 @@ export default function DashboardPage() {
     // Find actual rank of the brand
     const brandRank = allBrandsWithShare.findIndex(b => b.isYourBrand) + 1;
 
+    // Count total prompts from topics
+    const topics = analysisData.topics || [];
+    const totalPrompts = topics.reduce((sum: number, t: any) => sum + (t.prompts?.length || 0), 0);
+
     const metrics = {
       visibilityScore,
       shareOfVoice,
-      totalMentions,
-      totalResponses: allResponses.length,
+      totalMentions: brandMentions,
+      totalResponses: allResults.length,
       topSources,
       topUrls,
       competitors,
@@ -305,7 +306,9 @@ export default function DashboardPage() {
       brandRank,
       totalMarketMentions,
       promptResults: promptResults.length,
-      promptsCount: analysisData.prompts?.length || 0,
+      promptsCount: totalPrompts,
+      avgPosition,
+      avgSentiment,
     };
 
     console.log('[Dashboard] Calculated Metrics:', metrics);

@@ -24,35 +24,18 @@ export default function SentimentPage() {
     return analyses[0];
   }, [analyses]);
 
-  // Calculate sentiment metrics
+  // Calculate sentiment metrics from prompt results
   const sentimentMetrics = useMemo(() => {
     if (!latestAnalysis?.analysisData) return null;
 
     const analysisData = latestAnalysis.analysisData as any;
-    const oldResponses = analysisData.responses || [];
     const promptResults = analysisData.promptResults || [];
     const yourBrandName = (analysisData.company?.name || '').toLowerCase();
     
-    // Convert promptResults to unified response format
-    const promptResponses: any[] = [];
-    promptResults.forEach((promptResult: any) => {
-      promptResult.results?.forEach((result: any) => {
-        if (result.response || result.text) {
-          promptResponses.push({
-            provider: result.provider || 'Unknown',
-            response: result.response || result.text || '',
-            text: result.response || result.text || '',
-            prompt: promptResult.prompt,
-            sentimentScore: result.sentimentScore,
-            sentiment: result.sentiment,
-            timestamp: result.timestamp,
-          });
-        }
-      });
-    });
-
-    // Merge both response sources
-    const responses = [...oldResponses, ...promptResponses];
+    // Get all results from prompt results
+    const allResults = promptResults
+      .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+      .flatMap((pr: any) => pr.results);
     
     const providerMap: Record<string, any> = {};
     let allSentimentScores: number[] = [];
@@ -60,9 +43,9 @@ export default function SentimentPage() {
     let neutralCount = 0;
     let negativeCount = 0;
     
-    // Process responses by provider
-    responses.forEach((response: any) => {
-      const provider = response.provider?.toLowerCase() || 'unknown';
+    // Process results by provider
+    allResults.forEach((result: any) => {
+      const provider = result.provider?.toLowerCase() || 'unknown';
       
       if (!providerMap[provider]) {
         providerMap[provider] = {
@@ -75,8 +58,8 @@ export default function SentimentPage() {
       }
       
       // Track sentiment if available
-      if (response.sentimentScore !== undefined) {
-        const score = response.sentimentScore;
+      if (result.sentimentScore !== undefined) {
+        const score = result.sentimentScore;
         providerMap[provider].sentimentScores.push(score);
         allSentimentScores.push(score);
         
@@ -92,13 +75,13 @@ export default function SentimentPage() {
           negativeCount++;
         }
         
-        // Store mention details
-        const text = response.response || response.text || '';
-        if (text.toLowerCase().includes(yourBrandName)) {
+        // Store mention details if brand was mentioned
+        if (result.brandMentioned) {
+          const text = result.response || '';
           providerMap[provider].mentions.push({
             text: text.substring(0, 200) + '...',
             score,
-            prompt: response.prompt,
+            prompt: '', // We don't have prompt text in results
           });
         }
       }

@@ -49,7 +49,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useSession, signOut } from "@/lib/auth-client";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 const analyticsItems = [
   {
@@ -117,7 +116,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-black text-white">
                   <span className="text-xl">🏠</span>
                 </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="grid flex-1 text-left text-sm leading-tight transition-all duration-200 group-data-[collapsible=icon]:hidden">
                   <span className="truncate font-semibold">Geomization</span>
                   <span className="truncate text-xs">Analytics</span>
                 </div>
@@ -127,49 +126,47 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
-        <ScrollArea className="flex-1">
-          <SidebarGroup>
-            <SidebarGroupLabel>Analytics</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {analyticsItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={pathname === item.url} tooltip={item.title}>
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+      <SidebarContent className="pb-24">
+        <SidebarGroup>
+          <SidebarGroupLabel>Analytics</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {analyticsItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={pathname === item.url} tooltip={item.title}>
+                    <Link href={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-          <SidebarSeparator />
+        <SidebarSeparator />
 
-          <SidebarGroup>
-            <SidebarGroupLabel>Action</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {actionItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={pathname === item.url} tooltip={item.title}>
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </ScrollArea>
+        <SidebarGroup>
+          <SidebarGroupLabel>Action</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {actionItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={pathname === item.url} tooltip={item.title}>
+                    <Link href={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="sticky bottom-0 mt-auto border-t border-sidebar-border bg-sidebar pb-3 pt-3 supports-[backdrop-filter]:bg-sidebar/90 supports-[backdrop-filter]:backdrop-blur">
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -182,11 +179,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <AvatarImage src={session?.user?.image || ""} alt={session?.user?.name || ""} />
                     <AvatarFallback className="rounded-lg">{userInitials}</AvatarFallback>
                   </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
+                  <div className="grid flex-1 text-left text-sm leading-tight transition-all duration-200 group-data-[collapsible=icon]:hidden">
                     <span className="truncate font-semibold">{session?.user?.name || "User"}</span>
                     <span className="truncate text-xs">{session?.user?.email || ""}</span>
                   </div>
-                  <ChevronRight className="ml-auto size-4 transition-transform group-data-[state=open]/menu-item:rotate-90" />
+                  <ChevronRight className="ml-auto size-4 transition-transform group-data-[state=open]/menu-item:rotate-90 group-data-[collapsible=icon]:hidden" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent

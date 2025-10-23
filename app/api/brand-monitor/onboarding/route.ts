@@ -6,6 +6,14 @@ import { handleApiError, AuthenticationError, ValidationError } from '@/lib/api-
 import { scrapeCompanyInfo } from '@/lib/scrape-utils';
 import { fetchCompetitorsWithWebSearch } from '@/lib/perplexity';
 import type { CompanyInput } from '@/lib/types';
+import { 
+  createAnalysisTrace, 
+  updateTraceOutput, 
+  flushLangfuse,
+  addEvent,
+  createSpan,
+  completeSpan
+} from '@/lib/langfuse-client';
 
 interface OnboardingData {
   websiteUrl: string;
@@ -19,6 +27,13 @@ interface OnboardingData {
 }
 
 export async function POST(request: NextRequest) {
+  // Create Langfuse trace for onboarding workflow
+  const trace = createAnalysisTrace('Onboarding Workflow', {
+    brandName: 'unknown',
+    useWebSearch: true,
+    feature: 'onboarding',
+  });
+
   try {
     const sessionResponse = await auth.api.getSession({
       headers: request.headers,
@@ -37,15 +52,28 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[onboarding] Starting onboarding process...');
+    
+    if (trace) {
+      addEvent(trace, 'onboarding_started', {
+        websiteUrl,
+        hasTopics: !!topics?.length,
+        hasPrompts: !!prompts?.length,
+        hasCompetitors: !!competitors?.length,
+        userId: sessionResponse.user.id,
+      });
+    }
 
     // Step 1: Scrape company info using Firecrawl
     console.log('[onboarding] Step 1: Scraping company info with Firecrawl...');
+    const scrapeSpan = createSpan(trace, 'scrape_company_info', { url: websiteUrl });
     let companyInfo;
     try {
       companyInfo = await scrapeCompanyInfo(websiteUrl);
       console.log(`[onboarding] Company scraped: ${companyInfo.name}`);
+      completeSpan(scrapeSpan, { success: true, companyName: companyInfo.name });
     } catch (error) {
       console.error('[onboarding] Error scraping company:', error);
+      completeSpan(scrapeSpan, { success: false, error: error instanceof Error ? error.message : String(error) });
       // Use fallback data
       companyInfo = {
         id: crypto.randomUUID(),
@@ -61,6 +89,7 @@ export async function POST(request: NextRequest) {
     let finalCompetitors = competitors;
     if (!competitors || competitors.length === 0) {
       console.log('[onboarding] Step 2: Finding competitors with Perplexity...');
+      const competitorSpan = createSpan(trace, 'find_competitors', { companyName: companyInfo.name });
       try {
         const companyInput: CompanyInput = {
           name: companyInfo.name,
@@ -76,8 +105,10 @@ export async function POST(request: NextRequest) {
           url: '', // Perplexity doesn't return URLs
         }));
         console.log(`[onboarding] Found ${finalCompetitors.length} competitors`);
+        completeSpan(competitorSpan, { success: true, count: finalCompetitors.length, competitors: finalCompetitors.map(c => c.name) });
       } catch (error) {
         console.error('[onboarding] Error finding competitors:', error);
+        completeSpan(competitorSpan, { success: false, error: error instanceof Error ? error.message : String(error) });
         // Continue without competitors
         finalCompetitors = [];
       }
@@ -139,6 +170,24 @@ export async function POST(request: NextRequest) {
 
     console.log('[onboarding] Onboarding completed successfully');
 
+    // Update trace with final results
+    if (trace) {
+      updateTraceOutput(trace, {
+        success: true,
+        analysisId: newAnalysis.id,
+        companyName: companyInfo.name,
+        competitorsCount: finalCompetitors.length,
+        promptsCount: normalizedPrompts.length,
+      }, {
+        companyName: companyInfo.name,
+        industry: companyInfo.industry,
+        scraped: companyInfo.scraped,
+      });
+      
+      await flushLangfuse();
+      console.log('[Langfuse] Onboarding trace completed and flushed');
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Onboarding completed successfully',
@@ -148,6 +197,15 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[onboarding] Error:', error);
+    
+    // Log error to trace
+    if (trace) {
+      addEvent(trace, 'onboarding_error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await flushLangfuse();
+    }
+    
     return handleApiError(error);
   }
 }

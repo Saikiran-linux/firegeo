@@ -14,9 +14,9 @@ import { useSession } from '@/lib/auth-client';
 // Maximum valid position number; positions >= this are considered invalid/placeholder
 const MAX_VALID_POSITION = 999;
 
-// Helper function: Calculate provider-specific metrics
+// Helper function: Calculate provider-specific metrics from results
 function calculateProviderMetrics(
-  responses: any[],
+  results: any[],
   yourBrandName: string,
   identifiedCompetitors: any[]
 ) {
@@ -31,15 +31,15 @@ function calculateProviderMetrics(
       mentions: 0,
       positions: [],
       sentimentScores: [],
-      responses: [],
+      results: [],
       url: comp.url,
       type: comp.type || 'direct',
     });
   });
   
-  // Process responses by provider
-  responses.forEach((response: any) => {
-    const provider = response.provider?.toLowerCase() || 'unknown';
+  // Process results by provider
+  results.forEach((result: any) => {
+    const provider = result.provider?.toLowerCase() || 'unknown';
     
     if (!providerMap[provider]) {
       providerMap[provider] = {
@@ -52,15 +52,14 @@ function calculateProviderMetrics(
     providerMap[provider].totalResponses++;
     
     // Check for brand mentions
-    const text = (response.response || response.text || '').toLowerCase();
-    if (text.includes(yourBrandName)) {
+    if (result.brandMentioned) {
       providerMap[provider].brandMentions++;
     }
     
-    // Track competitors from response
-    if (response.competitors) {
-      response.competitors.forEach((comp: any) => {
-        const compName = comp.company?.name || comp.name;
+    // Track competitors from result
+    if (result.competitors) {
+      result.competitors.forEach((comp: any) => {
+        const compName = comp.name;
         if (compName && compName.toLowerCase() !== yourBrandName) {
           // Provider-specific tracking
           const providerComp = providerMap[provider].competitors.get(compName) || {
@@ -68,7 +67,6 @@ function calculateProviderMetrics(
             mentions: 0,
             positions: [],
             sentimentScores: [],
-            company: comp.company || { name: compName },
           };
           providerComp.mentions++;
           if (comp.position && comp.position < MAX_VALID_POSITION) {
@@ -85,8 +83,7 @@ function calculateProviderMetrics(
             mentions: 0,
             positions: [],
             sentimentScores: [],
-            responses: [],
-            company: comp.company || { name: compName },
+            results: [],
           };
           overallComp.mentions++;
           if (comp.position && comp.position < MAX_VALID_POSITION) {
@@ -95,9 +92,8 @@ function calculateProviderMetrics(
           if (comp.sentimentScore !== undefined) {
             overallComp.sentimentScores.push(comp.sentimentScore);
           }
-          overallComp.responses.push({
+          overallComp.results.push({
             provider,
-            prompt: response.prompt,
             position: comp.position,
             sentiment: comp.sentimentScore,
           });
@@ -135,23 +131,17 @@ function calculateProviderMetrics(
   return { providerMap, allCompetitors };
 }
 
-// Helper function: Calculate overall metrics
+// Helper function: Calculate overall metrics from results
 function calculateOverallMetrics(
-  responses: any[],
+  results: any[],
   allCompetitors: Map<string, any>,
   yourBrandName: string
 ) {
-  // Count brand mentions
-  let brandMentions = 0;
-  responses.forEach((response: any) => {
-    const text = (response.response || response.text || '').toLowerCase();
-    if (text.includes(yourBrandName)) {
-      brandMentions++;
-    }
-  });
+  // Count brand mentions from results
+  const brandMentions = results.filter((r: any) => r.brandMentioned).length;
 
   // Calculate overall metrics
-  const totalResponseCount = responses.length;
+  const totalResponseCount = results.length;
   const competitorMentions = Array.from(allCompetitors.values())
     .reduce((sum: number, c: any) => sum + c.mentions, 0);
   const totalMarketMentions = brandMentions + competitorMentions;
@@ -202,39 +192,22 @@ export default function CompetitorsPage() {
     return analyses[0];
   }, [analyses]);
 
-  // Normalize responses from both old and new formats
+  // Get data from prompt results
   const normalizedData = useMemo(() => {
     if (!latestAnalysis?.analysisData) return null;
 
     const analysisData = latestAnalysis.analysisData as any;
-    const oldResponses = analysisData.responses || [];
     const promptResults = analysisData.promptResults || [];
-    const yourBrandName = analysisData.company?.name?.toLowerCase() || '';
+    const yourBrandName = (analysisData.company?.name || '').toLowerCase();
     const identifiedCompetitors = (latestAnalysis as any).identifiedCompetitors || latestAnalysis.competitors || [];
     
-    // Convert promptResults to unified response format
-    const promptResponses: any[] = [];
-    promptResults.forEach((promptResult: any) => {
-      promptResult.results?.forEach((result: any) => {
-        if (result.response || result.text) {
-          promptResponses.push({
-            provider: result.provider || 'Unknown',
-            response: result.response || result.text || '',
-            text: result.response || result.text || '',
-            prompt: promptResult.prompt,
-            competitors: result.competitors || [],
-            citations: result.citations || result.sources || [],
-            timestamp: result.timestamp,
-          });
-        }
-      });
-    });
-
-    // Merge both response sources
-    const responses = [...oldResponses, ...promptResponses];
+    // Get all results from prompt results
+    const allResults = promptResults
+      .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+      .flatMap((pr: any) => pr.results);
 
     return {
-      responses,
+      results: allResults,
       yourBrandName,
       identifiedCompetitors,
     };
@@ -244,11 +217,11 @@ export default function CompetitorsPage() {
   const competitorMetrics = useMemo(() => {
     if (!normalizedData) return null;
 
-    const { responses, yourBrandName, identifiedCompetitors } = normalizedData;
+    const { results, yourBrandName, identifiedCompetitors } = normalizedData;
 
     // Calculate provider-specific metrics
     const { providerMap, allCompetitors } = calculateProviderMetrics(
-      responses,
+      results,
       yourBrandName,
       identifiedCompetitors
     );
@@ -259,7 +232,7 @@ export default function CompetitorsPage() {
       totalMarketMentions,
       brandMentions,
       brandMarketShare,
-    } = calculateOverallMetrics(responses, allCompetitors, yourBrandName);
+    } = calculateOverallMetrics(results, allCompetitors, yourBrandName);
 
     return {
       byProvider: providerMap,

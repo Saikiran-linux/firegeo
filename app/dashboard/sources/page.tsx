@@ -6,10 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ExternalLink, FileText, TrendingUp, Globe } from 'lucide-react';
+import { Loader2, ExternalLink, FileText, TrendingUp, Globe, Target, Award, BarChart3 } from 'lucide-react';
 import { useBrandAnalyses } from '@/hooks/useBrandAnalyses';
 import { useRouter } from 'next/navigation';
 import { useSession } from '@/lib/auth-client';
+import { calculateBrandVsCompetitorMetrics } from '@/lib/citation-utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function SourcesPage() {
   const { data: session, isPending: sessionLoading } = useSession();
@@ -25,41 +27,47 @@ export default function SourcesPage() {
     return analyses[0];
   }, [analyses]);
 
-  // Calculate source metrics by provider
+  // Calculate competitive metrics from prompt results
+  const competitiveMetrics = useMemo(() => {
+    if (!latestAnalysis?.analysisData) return null;
+    
+    const analysisData = latestAnalysis.analysisData;
+    const brandName = analysisData.company?.name || latestAnalysis.brandName || '';
+    const competitors = analysisData.competitors || [];
+    const promptResults = analysisData.promptResults || [];
+    
+    // Get all results from prompt results
+    const allResults = promptResults
+      .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+      .flatMap((pr: any) => pr.results);
+    
+    if (allResults.length === 0 || !brandName || competitors.length === 0) {
+      return null;
+    }
+
+    return calculateBrandVsCompetitorMetrics(allResults, brandName, competitors);
+  }, [latestAnalysis]);
+
+  // Calculate source metrics by provider from prompt results
   const sourceMetrics = useMemo(() => {
     if (!latestAnalysis?.analysisData) return null;
 
     const analysisData = latestAnalysis.analysisData;
-    const oldResponses = analysisData.responses || [];
     const promptResults = analysisData.promptResults || [];
     const citationAnalysis = analysisData.citationAnalysis || {};
     
-    // Convert promptResults to unified response format
-    const promptResponses: any[] = [];
-    promptResults.forEach((promptResult: any) => {
-      promptResult.results?.forEach((result: any) => {
-        if (result.response || result.text) {
-          promptResponses.push({
-            provider: result.provider || 'Unknown',
-            response: result.response || result.text || '',
-            prompt: promptResult.prompt,
-            citations: result.citations || result.sources || [],
-            timestamp: result.timestamp,
-          });
-        }
-      });
-    });
-
-    // Merge both response sources
-    const responses = [...oldResponses, ...promptResponses];
+    // Get all results from prompt results
+    const allResults = promptResults
+      .filter((pr: any) => pr && pr.results && pr.results.length > 0)
+      .flatMap((pr: any) => pr.results);
     
     const providerMap: Record<string, any> = {};
     const allSources = new Map<string, number>();
     const allUrls = new Map<string, number>();
     
     // Group by provider
-    responses.forEach((response: any) => {
-      const provider = response.provider?.toLowerCase() || 'unknown';
+    allResults.forEach((result: any) => {
+      const provider = result.provider?.toLowerCase() || 'unknown';
       
       if (!providerMap[provider]) {
         providerMap[provider] = {
@@ -70,10 +78,10 @@ export default function SourcesPage() {
       }
       
       // Track citations
-      if (response.citations) {
-        providerMap[provider].citationCount += response.citations.length;
+      if (result.citations) {
+        providerMap[provider].citationCount += result.citations.length;
         
-        response.citations.forEach((citation: any) => {
+        result.citations.forEach((citation: any) => {
           const url = citation.url;
           
           // Skip Google's internal proxy URLs
@@ -140,7 +148,7 @@ export default function SourcesPage() {
         .sort((a, b) => b.count - a.count),
       totalSources: allSources.size,
       totalUrls: allUrls.size,
-      totalCitations: responses.reduce((sum: number, r: any) => sum + (r.citations?.length || 0), 0),
+      totalCitations: allResults.reduce((sum: number, r: any) => sum + (r.citations?.length || 0), 0),
       citationAnalysis,
     };
   }, [latestAnalysis]);
@@ -361,6 +369,220 @@ export default function SourcesPage() {
                   </div>
                 </CardContent>
               </Card>
+            )}
+
+            {/* Brand vs Competitor Citation Analysis */}
+            {competitiveMetrics && (
+              <>
+                <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Target className="h-5 w-5 text-primary" />
+                      Brand vs Competitor Citations
+                    </CardTitle>
+                    <CardDescription>
+                      How your brand compares to competitors in AI-generated citations
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-6">
+                      {/* Share of Voice */}
+                      <div>
+                        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                          <Award className="h-4 w-4" />
+                          Share of Voice
+                        </h3>
+                        <div className="space-y-2">
+                          {/* Brand */}
+                          <div className="flex items-center gap-2">
+                            <div className="w-32 text-sm font-medium truncate">
+                              {competitiveMetrics.brandName}
+                            </div>
+                            <div className="flex-1 relative h-8 bg-muted rounded-md overflow-hidden">
+                              <div
+                                className="absolute left-0 top-0 h-full bg-primary transition-all duration-500"
+                                style={{ width: `${competitiveMetrics.shareOfVoice.brand}%` }}
+                              />
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-xs font-medium text-foreground mix-blend-difference">
+                                  {competitiveMetrics.shareOfVoice.brand.toFixed(1)}%
+                                </span>
+                              </div>
+                            </div>
+                            <div className="w-16 text-right">
+                              <Badge variant="default" className="text-xs">
+                                {competitiveMetrics.brandCitations.count}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          {/* Competitors */}
+                          {Object.entries(competitiveMetrics.shareOfVoice.competitors).map(([competitor, sov]) => {
+                            const compData = competitiveMetrics.competitorCitations[competitor];
+                            return (
+                              <div key={competitor} className="flex items-center gap-2">
+                                <div className="w-32 text-sm text-muted-foreground truncate">
+                                  {competitor}
+                                </div>
+                                <div className="flex-1 relative h-8 bg-muted rounded-md overflow-hidden">
+                                  <div
+                                    className="absolute left-0 top-0 h-full bg-orange-500/70 transition-all duration-500"
+                                    style={{ width: `${sov}%` }}
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-xs font-medium text-foreground mix-blend-difference">
+                                      {sov.toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="w-16 text-right">
+                                  <Badge variant="secondary" className="text-xs">
+                                    {compData?.count || 0}
+                                  </Badge>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Citation Gap */}
+                      {competitiveMetrics.citationGap.leadingCompetitor && (
+                        <div className="p-4 bg-muted/50 rounded-lg border border-muted">
+                          <div className="flex items-start gap-3">
+                            <BarChart3 className="h-5 w-5 text-orange-500 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium">Citation Gap Analysis</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                <span className="font-semibold">{competitiveMetrics.citationGap.leadingCompetitor}</span>
+                                {' '}leads by{' '}
+                                <span className="font-semibold">{Math.abs(competitiveMetrics.citationGap.gap)}</span>
+                                {' '}citations
+                                {' '}({competitiveMetrics.citationGap.gapPercentage.toFixed(1)}% more)
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Detailed Metrics Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Brand Card */}
+                        <div className="p-4 bg-primary/5 rounded-lg border border-primary/20">
+                          <p className="text-sm font-semibold mb-3">{competitiveMetrics.brandName}</p>
+                          <div className="space-y-2 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Citations</span>
+                              <span className="font-medium">{competitiveMetrics.brandCitations.count}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Unique Sources</span>
+                              <span className="font-medium">{competitiveMetrics.brandCitations.uniqueSources}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Avg Position</span>
+                              <span className="font-medium">{competitiveMetrics.brandCitations.averagePosition.toFixed(1)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Top Competitor */}
+                        {competitiveMetrics.citationGap.leadingCompetitor && (
+                          <div className="p-4 bg-muted/30 rounded-lg border border-muted">
+                            <p className="text-sm font-semibold mb-3">
+                              {competitiveMetrics.citationGap.leadingCompetitor}
+                              <Badge variant="secondary" className="ml-2 text-xs">Leading</Badge>
+                            </p>
+                            <div className="space-y-2 text-xs">
+                              {(() => {
+                                const topComp = competitiveMetrics.competitorCitations[competitiveMetrics.citationGap.leadingCompetitor];
+                                return topComp ? (
+                                  <>
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Citations</span>
+                                      <span className="font-medium">{topComp.count}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Unique Sources</span>
+                                      <span className="font-medium">{topComp.uniqueSources}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Avg Position</span>
+                                      <span className="font-medium">{topComp.averagePosition.toFixed(1)}</span>
+                                    </div>
+                                  </>
+                                ) : null;
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Top Sources Comparison */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Top Citation Sources by Company</CardTitle>
+                    <CardDescription>
+                      Where different companies are most frequently cited
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Tabs defaultValue={competitiveMetrics.brandName} className="w-full">
+                      <TabsList className="grid w-full" style={{ gridTemplateColumns: `repeat(${1 + Object.keys(competitiveMetrics.topSourcesForCompetitors).length}, minmax(0, 1fr))` }}>
+                        <TabsTrigger value={competitiveMetrics.brandName}>
+                          {competitiveMetrics.brandName}
+                        </TabsTrigger>
+                        {Object.keys(competitiveMetrics.topSourcesForCompetitors).map(competitor => (
+                          <TabsTrigger key={competitor} value={competitor}>
+                            {competitor}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                      
+                      <TabsContent value={competitiveMetrics.brandName} className="mt-4">
+                        <div className="space-y-2">
+                          {competitiveMetrics.topSourcesForBrand.map((source, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground w-6">#{idx + 1}</span>
+                                <Globe className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-sm">{source.domain}</span>
+                              </div>
+                              <Badge variant="secondary">{source.count}</Badge>
+                            </div>
+                          ))}
+                          {competitiveMetrics.topSourcesForBrand.length === 0 && (
+                            <p className="text-sm text-muted-foreground text-center py-4">No sources found</p>
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {Object.entries(competitiveMetrics.topSourcesForCompetitors).map(([competitor, sources]) => (
+                        <TabsContent key={competitor} value={competitor} className="mt-4">
+                          <div className="space-y-2">
+                            {sources.map((source, idx) => (
+                              <div key={idx} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-muted-foreground w-6">#{idx + 1}</span>
+                                  <Globe className="h-3 w-3 text-muted-foreground" />
+                                  <span className="text-sm">{source.domain}</span>
+                                </div>
+                                <Badge variant="secondary">{source.count}</Badge>
+                              </div>
+                            ))}
+                            {sources.length === 0 && (
+                              <p className="text-sm text-muted-foreground text-center py-4">No sources found</p>
+                            )}
+                          </div>
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                  </CardContent>
+                </Card>
+              </>
             )}
 
             {/* Tabs for Domains vs URLs */}
